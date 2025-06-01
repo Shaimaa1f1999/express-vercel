@@ -2,7 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-app.use(express.json());
+// 🔥 زيدي الحد هنا
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.post('/', async (req, res) => {
   const { email, token, projects } = req.body;
