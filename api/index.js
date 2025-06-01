@@ -1,11 +1,11 @@
 const express = require('express');
-const axios = require('axios'); // نستخدمه عشان نرسل طلبات GET
+const axios = require('axios');
 const app = express();
 
 app.use(express.json());
 
 app.post('/', async (req, res) => {
-  const { email, projects } = req.body;
+  const { email, token, projects } = req.body;
   const filteredProjects = [];
 
   for (const project of projects) {
@@ -13,8 +13,13 @@ app.post('/', async (req, res) => {
     if (!url) continue;
 
     try {
-      const response = await axios.get(url);
-      const users = response.data; // تأكد إن هذا يرجع Array من الإيميلات أو objects فيهم إيميلات
+      const response = await axios.get(url, {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${token}`
+        }
+      });
+
+      const users = response.data;
 
       const match = users.some(user =>
         (typeof user === 'string' && user.includes(email)) ||
@@ -22,9 +27,8 @@ app.post('/', async (req, res) => {
       );
 
       if (match) filteredProjects.push(project);
-
     } catch (error) {
-      console.error(`Error fetching users from ${url}:`, error.message);
+      console.error(`Error fetching from ${url}:`, error.message);
     }
   }
 
