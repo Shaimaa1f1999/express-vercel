@@ -2,7 +2,6 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-// 🔥 زيدي الحد هنا
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -11,7 +10,7 @@ app.post('/', async (req, res) => {
   const filteredProjects = [];
 
   for (const project of projects) {
-    const url = project.link?.user?.url;
+    const url = project.url;
     if (!url) continue;
 
     try {
@@ -21,11 +20,11 @@ app.post('/', async (req, res) => {
         }
       });
 
-      const users = response.data;
+      const users = response.data?.users ?? [];
 
       const match = users.some(user =>
-        (typeof user === 'string' && user.includes(email)) ||
-        (typeof user === 'object' && user.email?.includes(email))
+        (typeof user === 'string' && user.toLowerCase().includes(email.toLowerCase())) ||
+        (typeof user === 'object' && user.email?.toLowerCase().includes(email.toLowerCase()))
       );
 
       if (match) filteredProjects.push(project);
