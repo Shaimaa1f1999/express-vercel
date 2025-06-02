@@ -14,9 +14,8 @@ return res.status(200).json({
   projectManager: matched.projectManager,
   startDate: matched.startDate,
   endDate: matched.endDate,
-  status: matched.status,
-  technologies: matched.technologies,
-  description: matched.description,
+  status: matched.status
+ 
 });
 
 }
