@@ -8,25 +8,24 @@ module.exports = async (req, res) => {
   }
 
   const token = `Zoho-oauthtoken ${access_token}`;
-  const portal = "alnafithait"; // غيّريه إذا مختلف
+  const portal = "alnafithait"; // عدّلي إذا اختلف
 
   try {
-    // ✅ إذا projects عبارة عن { projects: [ ... ] }
-    const projectArray = Array.isArray(projects) ? projects : projects.projects;
+    // 1. دور على المشروع من المشاريع المفلترة
+    const matchedProject = projects.find(p => p.name === projectName);
 
-    const matchedProject = projectArray.find(p => p.name === projectName);
     if (!matchedProject) {
-      return res.status(404).json({ error: "Project not found in list" });
+      return res.status(404).json({ error: "Project not found in provided list" });
     }
 
     const projectId = matchedProject.id_string;
-    const userURL = matchedProject?.link?.user?.url;
+    const userURL = matchedProject.userURL;
 
     if (!projectId || !userURL) {
       return res.status(400).json({ error: "Missing projectId or userURL" });
     }
 
-    // 2. جيب المستخدمين من المشروع
+    // 2. جيب اليوزرز من المشروع
     const usersRes = await axios.get(userURL, {
       headers: {
         Authorization: token
@@ -34,32 +33,24 @@ module.exports = async (req, res) => {
     });
 
     const user = usersRes.data.users.find(u => u.email === email);
+
     if (!user) {
       return res.status(404).json({ error: "User not found in project" });
     }
 
     const userId = user.id;
 
-    // 3. جيب اللوق أورز لهالمستخدم
+    // 3. جيب اللوق أورز
     const logsRes = await axios.get(
       `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${projectId}/logs/?user=${userId}`,
       {
-        headers: {
-          Authorization: token
-        }
+        headers: { Authorization: token }
       }
     );
 
     return res.status(200).json({
-      matchedProject: {
-        name: projectName,
-        projectId,
-        userURL
-      },
-      matchedUser: {
-        email,
-        userId
-      },
+      project: { name: matchedProject.name, projectId, userURL },
+      user: { email, userId },
       logs: logsRes.data.timelogs
     });
 
