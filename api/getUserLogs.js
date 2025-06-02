@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-app.post('/', async (req, res) => {
+app.post('/getUserLogs', async (req, res) => {
   const { email, token, projects } = req.body;
   const portal = "alnafithait";
   const filteredProjects = [];
