@@ -11,7 +11,7 @@ export default function handler(req, res) {
 
   return res.status(200).json({
     projectName: matched.projectName,
-    manager: matched.projectManager,
+    manager: matched.manager,
     startDate: matched.startDate,
     endDate: matched.endDate,
     status: matched.status
