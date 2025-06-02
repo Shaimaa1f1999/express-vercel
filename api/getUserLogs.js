@@ -11,8 +11,10 @@ module.exports = async (req, res) => {
   const portal = "alnafithait"; // غيّريه إذا مختلف
 
   try {
-    // 1. دور على المشروع المطلوب
-    const matchedProject = projects.find(p => p.name === projectName);
+    // ✅ إذا projects عبارة عن { projects: [ ... ] }
+    const projectArray = Array.isArray(projects) ? projects : projects.projects;
+
+    const matchedProject = projectArray.find(p => p.name === projectName);
     if (!matchedProject) {
       return res.status(404).json({ error: "Project not found in list" });
     }
