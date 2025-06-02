@@ -1,5 +1,3 @@
-const axios = require('axios');
-
 module.exports = async (req, res) => {
   const { email, token, projects, projectName } = req.body;
   const portal = "alnafithait";
@@ -11,23 +9,12 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid project data" });
     }
 
-    // Get users
-    const userRes = await axios.get(matched.userURL, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` }
-    });
-
-    const user = userRes.data?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found in project" });
-    }
-
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${matched.id_string}/logs/?user=${user.id}`;
+    // بناء الرابط فقط بدون استدعاء API
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${matched.id_string}/logs/`;
 
     res.json({
       email,
       projectName,
-      userId: user.id,
       logsURL
     });
 
