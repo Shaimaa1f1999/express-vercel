@@ -1,17 +1,30 @@
 const axios = require("axios");
 
 module.exports = async (req, res) => {
-  const { projectName, projectId, userURL, email, access_token } = req.body;
+  const { projectName, email, projects, access_token } = req.body;
 
-  if (!projectId || !userURL || !email || !access_token) {
-    return res.status(400).json({ error: "Missing input" });
+  if (!projectName || !email || !projects || !access_token) {
+    return res.status(400).json({ error: "Missing required fields" });
   }
 
   const token = `Zoho-oauthtoken ${access_token}`;
-  const portal = "alnafithait"; // غيره إذا عندكم غير
+  const portal = "alnafithait"; // غيّريه إذا مختلف
 
   try {
-    // 1. Get users from userURL
+    // 1. دور على المشروع المطلوب
+    const matchedProject = projects.find(p => p.name === projectName);
+    if (!matchedProject) {
+      return res.status(404).json({ error: "Project not found in list" });
+    }
+
+    const projectId = matchedProject.id_string;
+    const userURL = matchedProject?.link?.user?.url;
+
+    if (!projectId || !userURL) {
+      return res.status(400).json({ error: "Missing projectId or userURL" });
+    }
+
+    // 2. جيب المستخدمين من المشروع
     const usersRes = await axios.get(userURL, {
       headers: {
         Authorization: token
@@ -25,21 +38,34 @@ module.exports = async (req, res) => {
 
     const userId = user.id;
 
-    // 2. Get logs for that user
-    const logsRes = await axios.get(`https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${projectId}/logs/?user=${userId}`, {
-      headers: {
-        Authorization: token
+    // 3. جيب اللوق أورز لهالمستخدم
+    const logsRes = await axios.get(
+      `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${projectId}/logs/?user=${userId}`,
+      {
+        headers: {
+          Authorization: token
+        }
       }
-    });
+    );
 
     return res.status(200).json({
-      userId,
-      projectId,
+      matchedProject: {
+        name: projectName,
+        projectId,
+        userURL
+      },
+      matchedUser: {
+        email,
+        userId
+      },
       logs: logsRes.data.timelogs
     });
 
   } catch (err) {
-    console.error(err?.response?.data || err.message);
-    return res.status(500).json({ error: "Something went wrong", details: err?.response?.data });
+    console.error("Zoho API Error:", err?.response?.data || err.message);
+    return res.status(500).json({
+      error: "Something went wrong",
+      details: err?.response?.data || err.message
+    });
   }
 };
