@@ -1,20 +1,24 @@
 module.exports = async (req, res) => {
-  const { email, token, projects, projectName } = req.body;
+  const { email, token, projects, projectName, users } = req.body;
   const portal = "alnafithait";
 
   try {
-    const matched = projects.find(p => p.name === projectName);
-
-    if (!matched || !matched.id_string || !matched.userURL) {
-      return res.status(400).json({ error: "Missing or invalid project data" });
+    const matchedProject = projects.find(p => p.name === projectName);
+    if (!matchedProject || !matchedProject.id_string) {
+      return res.status(400).json({ error: "Invalid project data" });
     }
 
-    // بناء الرابط فقط بدون استدعاء API
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${matched.id_string}/logs/`;
+    const matchedUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!matchedUser || !matchedUser.id) {
+      return res.status(400).json({ error: "User not found" });
+    }
+
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${matchedProject.id_string}/logs/?users_list=${matchedUser.id}`;
 
     res.json({
       email,
       projectName,
+      userId: matchedUser.id,
       logsURL
     });
 
