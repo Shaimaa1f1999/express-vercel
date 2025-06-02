@@ -1,52 +1,38 @@
-const express = require('express');
 const axios = require('axios');
-const app = express();
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-app.post('/getUserLogs', async (req, res) => {
-  const { email, token, projects } = req.body;
+module.exports = async (req, res) => {
+  const { email, token, projects, projectName } = req.body;
   const portal = "alnafithait";
-  const filteredProjects = [];
 
-  for (const project of projects) {
-    const url = project.url;
-    const projectId = project.id_string;
-    const projectName = project.name;
-    if (!url || !projectId) continue;
+  try {
+    const matched = projects.find(p => p.name === projectName);
 
-    try {
-      const response = await axios.get(url, {
-        headers: {
-          Authorization: `Zoho-oauthtoken ${token}`
-        }
-      });
-
-      const users = response.data?.users ?? [];
-
-      const match = users.find(user =>
-        typeof user === 'object' &&
-        user.email?.toLowerCase() === email.toLowerCase()
-      );
-
-      if (match) {
-        const userId = match.id;
-        const logsURL = `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${projectId}/logs/?user=${userId}`;
-        filteredProjects.push({
-          name: projectName,
-          projectId,
-          userId,
-          logsURL
-        });
-      }
-
-    } catch (error) {
-      console.error(`Error fetching from ${url}:`, error.message);
+    if (!matched || !matched.id_string || !matched.userURL) {
+      return res.status(400).json({ error: "Missing or invalid project data" });
     }
+
+    // Get users
+    const userRes = await axios.get(matched.userURL, {
+      headers: { Authorization: `Zoho-oauthtoken ${token}` }
+    });
+
+    const user = userRes.data?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found in project" });
+    }
+
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${matched.id_string}/logs/?user=${user.id}`;
+
+    res.json({
+      email,
+      projectName,
+      userId: user.id,
+      logsURL
+    });
+
+  } catch (err) {
+    console.error("Error:", err.message || err.response?.data);
+    res.status(500).json({ error: "Server error", details: err.message || err.response?.data });
   }
-
-  res.json({ email, logs: filteredProjects });
-});
-
-module.exports = app;
+};
