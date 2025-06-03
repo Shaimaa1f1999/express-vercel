@@ -2,7 +2,8 @@ export default function handler(req, res) {
   const { projects, targetProjectName } = req.body;
 
   const matched = projects.find(
-    (p) => p.projectName.trim().toLowerCase() === targetProjectName.trim().toLowerCase()
+    (p) => p.name.trim().toLowerCase() === targetProjectName.trim().toLowerCase()
+
   );
 
   if (!matched) {
