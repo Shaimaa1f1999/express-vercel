@@ -1,29 +1,32 @@
-module.exports = async (req, res) => {
-  const { email, token, projects, projectName, users } = req.body;
-  const portal = "alnafithait";
+const axios = require("axios");
+
+export default async function handler(req, res) {
+  const { email, access_token, userURL, projectId } = req.body;
 
   try {
-    const matchedProject = projects.find(p => p.name === projectName);
-    if (!matchedProject || !matchedProject.id_string) {
-      return res.status(400).json({ error: "Invalid project data" });
+    const response = await axios.get(userURL, {
+      headers: {
+        Authorization: `Zoho-oauthtoken ${access_token}`
+      }
+    });
+
+    const matchedUser = response.data.users.find(
+      u => u.email?.toLowerCase() === email.toLowerCase()
+    );
+
+    if (!matchedUser) {
+      return res.status(404).json({ error: "User not found in this project" });
     }
 
-    const matchedUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!matchedUser || !matchedUser.id) {
-      return res.status(400).json({ error: "User not found" });
-    }
-
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/${portal}/projects/${matchedProject.id_string}/logs/?users_list=${matchedUser.id}`;
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}`;
 
     res.json({
-      email,
-      projectName,
       userId: matchedUser.id,
       logsURL
     });
 
   } catch (err) {
-    console.error("Error:", err.message || err.response?.data);
-    res.status(500).json({ error: "Server error", details: err.message || err.response?.data });
+    console.error(err.message);
+    res.status(500).json({ error: "Failed to fetch user or logs." });
   }
-};
+}
