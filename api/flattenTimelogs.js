@@ -1,10 +1,6 @@
 export default function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
-
   const input = req.body;
-  const timelogDates = input?.body?.timelogs?.date || [];
+  const timelogDates = input?.timelogs?.date || [];
 
   const result = [];
 
