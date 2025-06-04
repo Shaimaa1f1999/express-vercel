@@ -18,24 +18,16 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: "User not found in this project" });
     }
 
-    // هنا نحط الفلترة بالتاريخ إذا بغيت
-    
-
-const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=week&date=${date}&bill_status=All&component_type=task`;
-
-    const logsRes = await axios.get(logsURL, {
-      headers: {
-        Authorization: `Zoho-oauthtoken ${access_token}`
-      }
-    });
+    // رجّع اللينك فقط بدون ما تسوي request له
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=week&date=${date}&bill_status=All&component_type=task`;
 
     res.json({
       userId: matchedUser.id,
-      logs: logsRes.data
+      logsURL: logsURL
     });
 
   } catch (err) {
     console.error("ERROR", err.message);
-    res.status(500).json({ error: "Failed to fetch user or logs." });
+    res.status(500).json({ error: "Failed to generate logs URL." });
   }
 }
