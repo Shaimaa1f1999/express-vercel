@@ -1,7 +1,7 @@
 const axios = require("axios");
 
 export default async function handler(req, res) {
-  const { email, access_token, userURL, projectId } = req.body;
+  const { email, access_token, userURL, projectId, date } = req.body;
 
   try {
     const usersRes = await axios.get(userURL, {
@@ -19,8 +19,9 @@ export default async function handler(req, res) {
     }
 
     // هنا نحط الفلترة بالتاريخ إذا بغيت
-    const date = "06-01-2025";
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&date=${date}`;
+    
+
+const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=week&date=${date}&bill_status=All&component_type=task`;
 
     const logsRes = await axios.get(logsURL, {
       headers: {
