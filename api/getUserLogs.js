@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const { email, access_token, userURL, projectId, date } = req.body;
 
   try {
@@ -29,4 +29,4 @@ export default async function handler(req, res) {
     console.error("ERROR", err.message);
     res.status(500).json({ error: "Failed to fetch user or logs." });
   }
-}
+};
