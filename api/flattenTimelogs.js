@@ -1,8 +1,8 @@
-const express = require('express');
-const app = express();
-app.use(express.json());
+export default function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
 
-app.post('/flattenTimelogs', (req, res) => {
   const input = req.body;
   const timelogDates = input?.body?.timelogs?.date || [];
 
@@ -22,8 +22,5 @@ app.post('/flattenTimelogs', (req, res) => {
     });
   });
 
-  res.json(result);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+  res.status(200).json(result);
+}
