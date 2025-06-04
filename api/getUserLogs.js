@@ -4,10 +4,7 @@ export default async function handler(req, res) {
   const { email, access_token, userURL, projectId } = req.body;
 
   try {
-    // ✅ أضيفي هذا السطر لتصحيح URL:
-    const finalURL = userURL.endsWith('/') ? userURL : userURL + '/';
-
-    const response = await axios.get(finalURL, {
+    const response = await axios.get(userURL, {
       headers: {
         Authorization: `Zoho-oauthtoken ${access_token}`
       }
