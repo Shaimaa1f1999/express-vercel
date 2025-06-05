@@ -1,7 +1,7 @@
 const axios = require("axios");
 
 module.exports = async function handler(req, res) {
-  const { email, access_token, userURL, projectId, date, durationType } = req.body;
+  const { email, access_token, userURL, projectId, selectdate, durationType } = req.body;
 
   try {
     const usersRes = await axios.get(userURL, {
