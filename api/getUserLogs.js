@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
 
     const viewType = durationType?.toLowerCase() === "month" ? "month" : "week";
 
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=${viewType}&date=${date}&bill_status=All&component_type=task`;
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=${viewType}&date=${selectdate}&bill_status=All&component_type=task`;
 
     res.json({
       userId: matchedUser.id,
