@@ -4,20 +4,20 @@ export default function handler(req, res) {
 
   const result = [];
 
-  // التاريخ اللي تبغى تبدأ منه (يكون بصيغة yyyy-MM-dd)
-  const startDate = "2025-06-02";
+  // التاريخ اللي تبغى تبدأ منه ككائن Date
+  const startDate = new Date("2025-06-02");
 
   timelogDates.forEach(day => {
-    const date = day.date;
+    const dateObj = new Date(day.date);
 
     // تجاهل أي يوم أقل من startDate
-    if (date < startDate) return;
+    if (dateObj < startDate) return;
 
     const total_hours = day.total_hours;
 
     (day.tasklogs || []).forEach(log => {
       result.push({
-        date,
+        date: day.date,
         name: log?.task?.name || '',
         total_hours,
         approval_status: log?.approval_status || ''
