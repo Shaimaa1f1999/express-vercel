@@ -1,7 +1,7 @@
 const axios = require("axios");
 
 module.exports = async function handler(req, res) {
-  const { email, access_token, userURL, projectId, durationType } = req.body;
+  const { email, access_token, userURL, projectId, durationType, selectdate } = req.body;
 
   try {
     const usersRes = await axios.get(userURL, {
@@ -20,10 +20,8 @@ module.exports = async function handler(req, res) {
 
     const viewType = durationType?.toLowerCase() === "month" ? "month" : "week";
 
-    // ✅ تاريخ ثابت:
-    const fixedDate = '06-02-2025'; // MM-dd-yyyy
-
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=${viewType}&date=${fixedDate}&bill_status=All&component_type=task`;
+    // ✅ تاريخ جاهز بصيغة yyyy-MM-dd جاي من Power Automate
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=${viewType}&date=${selectdate}&bill_status=All&component_type=task`;
 
     res.json({
       userId: matchedUser.id,
