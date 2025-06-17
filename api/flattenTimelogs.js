@@ -4,16 +4,19 @@ export default function handler(req, res) {
 
   const result = [];
 
-  // التاريخ اللي تبغى تبدأ منه
-  const startDate = new Date("2025-06-02");
+  // ✅ التاريخ اللي يحدده المستخدم (مثلاً "2025-06-18")
+  const startDate = new Date(input?.selectdate);
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 6); // أسبوع بعده
 
   timelogDates.forEach(day => {
     const [month, dayNum, year] = day.date.split("-");
-    const isoDateString = `${year}-${month}-${dayNum}`; // نحوله لـ yyyy-MM-dd
+    const isoDateString = `${year}-${month}-${dayNum}`;
     const dateObj = new Date(isoDateString);
 
-    // إذا التاريخ أقل من تاريخ البداية نطنشه
-    if (dateObj < startDate) return;
+    const dayOfWeek = dateObj.getDay(); // 5 = جمعة, 6 = سبت
+
+    if (dateObj < startDate || dateObj > endDate || dayOfWeek === 5 || dayOfWeek === 6) return;
 
     const total_hours = day.total_hours;
 
@@ -27,8 +30,9 @@ export default function handler(req, res) {
     });
   });
 
-  // نرتب النتائج حسب التاريخ بعد التحويل
   result.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   res.status(200).json(result);
 }
+
+
