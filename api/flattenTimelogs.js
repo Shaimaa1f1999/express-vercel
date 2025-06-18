@@ -4,16 +4,20 @@ export default function handler(req, res) {
 
   const result = [];
 
-  // التاريخ اللي تبدأ منه (كان ثابت)
-  const startDate = new Date("2025-06-02");
+  // التاريخ اللي حددته المستخدم (مثلاً "2025-06-18")
+  const startDate = new Date(input?.selectdate);
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 6); // نضيف 6 أيام قدام
 
   timelogDates.forEach(day => {
     const [month, dayNum, year] = day.date.split("-");
     const isoDateString = `${year}-${month}-${dayNum}`;
     const dateObj = new Date(isoDateString);
 
-    // نتجاهل التواريخ قبل البداية
-    if (dateObj < startDate) return;
+    const dayOfWeek = dateObj.getDay(); // 0 = أحد, ..., 6 = سبت
+
+    // نتجاهل التواريخ قبل startDate أو بعد endDate أو الجمعة/السبت
+    if (dateObj < startDate || dateObj > endDate || dayOfWeek === 5 || dayOfWeek === 6) return;
 
     const total_hours = day.total_hours;
 
