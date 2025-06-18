@@ -4,15 +4,13 @@ export default function handler(req, res) {
 
   const result = [];
 
-  // ✅ نستخدم التاريخ اللي اختاره المستخدم كـ بداية فقط
-  const startDate = new Date(input?.selectdate); // مثل 2025-06-17
+  const startDate = new Date(input?.selectdate + "T00:00:00");
 
   timelogDates.forEach(day => {
     const [month, dayNum, year] = day.date.split("-");
-    const isoDateString = `${year}-${month}-${dayNum}`;
-    const dateObj = new Date(isoDateString);
+    const isoDateString = `${year}-${month.padStart(2, '0')}-${dayNum.padStart(2, '0')}`;
+    const dateObj = new Date(isoDateString + "T00:00:00");
 
-    // ✅ رجّع فقط التواريخ اللي >= startDate
     if (dateObj < startDate) return;
 
     const total_hours = day.total_hours;
