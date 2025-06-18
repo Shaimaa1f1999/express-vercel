@@ -18,18 +18,18 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ error: "User not found in this project" });
     }
 
-    // لو ما أرسلت تواريخ نستخدم الافتراضيين
-    const startDate = selectdate?.start || "06-17-2025";
-    const endDate = selectdate?.end || "06-22-2025";
+    const viewTypeRaw = durationType?.toLowerCase();
+    const viewType = "custom_date"; // نغيره مؤقتاً لتجربة custom date
 
-    // بدل ما تستخدم القيمة المرسلة نخليها "custom" مؤقتًا
-    const viewType = "custom_date";
+    // نجهز التاريخين
+    const start = selectdate?.start || "06-17-2025";
+    const end = selectdate?.end || "06-22-2025";
 
-    // نحط custom_date كـ encoded JSON string بدون علامات اقتباس
-    const custom_date = `{start_date:${startDate},end_date:${endDate}}`;
-    const encoded = encodeURIComponent(custom_date);
+    // نبني الـ custom_date كـ JSON ونشفّره
+    const customDateObj = { start_date: start, end_date: end };
+    const encodedCustomDate = encodeURIComponent(JSON.stringify(customDateObj));
 
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs?users_list=${matchedUser.id}&view_type=${viewType}&date=${startDate}&custom_date=${encoded}&bill_status=All&component_type=task`;
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs?users_list=${matchedUser.id}&view_type=custom_date&date=${start}&custom_date=${encodedCustomDate}&bill_status=All&component_type=task`;
 
     res.json({
       userId: matchedUser.id,
