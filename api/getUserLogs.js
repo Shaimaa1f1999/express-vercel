@@ -18,9 +18,18 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ error: "User not found in this project" });
     }
 
-    const viewType = durationType?.toLowerCase() === "month" ? "month" : "week";
+    // لو ما أرسلت تواريخ نستخدم الافتراضيين
+    const startDate = selectdate?.start || "06-17-2025";
+    const endDate = selectdate?.end || "06-22-2025";
 
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=${viewType}&date=${selectdate}&bill_status=All&component_type=task`;
+    // بدل ما تستخدم القيمة المرسلة نخليها "custom" مؤقتًا
+    const viewType = "custom_date";
+
+    // نحط custom_date كـ encoded JSON string بدون علامات اقتباس
+    const custom_date = `{start_date:${startDate},end_date:${endDate}}`;
+    const encoded = encodeURIComponent(custom_date);
+
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs?users_list=${matchedUser.id}&view_type=${viewType}&date=${startDate}&custom_date=${encoded}&bill_status=All&component_type=task`;
 
     res.json({
       userId: matchedUser.id,
