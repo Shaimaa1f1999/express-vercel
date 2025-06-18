@@ -7,8 +7,9 @@ export default function handler(req, res) {
   const startDate = new Date(input?.selectdate + "T00:00:00");
 
   timelogDates.forEach(day => {
-    const [month, dayNum, year] = day.date.split("-");
-    const isoDateString = `${year}-${month.padStart(2, '0')}-${dayNum.padStart(2, '0')}`;
+  const [mm, dd, yyyy] = day.date.split("-");
+const isoDateString = `${yyyy}-${mm}-${dd}`;
+}`;
     const dateObj = new Date(isoDateString + "T00:00:00");
 
     if (dateObj < startDate) return;
