@@ -18,9 +18,23 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ error: "User not found in this project" });
     }
 
-    const viewType = durationType?.toLowerCase() === "month" ? "month" : "week";
+    // نحسب المدى الزمني من selectdate
+    const startDate = new Date(selectdate);
+    const endDate = new Date(startDate);
 
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=${viewType}&date=${selectdate}&bill_status=All&component_type=task`;
+    let daysAdded = 0;
+    while (daysAdded < 5) {
+      endDate.setDate(endDate.getDate() + 1);
+      const day = endDate.getDay(); // 0 = أحد, 5 = جمعة, 6 = سبت
+      if (day !== 5 && day !== 6) {
+        daysAdded++;
+      }
+    }
+
+    // صيغة yyyy-MM-dd
+    const formatDate = (date) => date.toISOString().split("T")[0];
+
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs/?users_list=${matchedUser.id}&view_type=custom&from_date=${formatDate(startDate)}&to_date=${formatDate(endDate)}&bill_status=All&component_type=task`;
 
     res.json({
       userId: matchedUser.id,
