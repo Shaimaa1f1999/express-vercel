@@ -4,19 +4,18 @@ export default function handler(req, res) {
 
   const result = [];
 
-  // التاريخ اللي حدده المستخدم (بداية الفلترة)
-  const startDate = new Date(input?.selectdate + "T00:00:00");
+  // تاريخ البداية بصيغة رقمية
+  const startDate = new Date(input?.selectdate + "T00:00:00").getTime();
 
   timelogDates.forEach(day => {
     if (!day?.date) return;
 
-    // صيغة التاريخ جايه MM-DD-YYYY من Zoho
     const [mm, dd, yyyy] = day.date.split("-");
     const isoDateString = `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
     const dateObj = new Date(isoDateString + "T00:00:00");
 
-    // نفلتر: فقط التواريخ من startDate وفوق
-    if (dateObj.toDateString() < startDate.toDateString()) return;
+    // المقارنة الرقمية لضمان الدقة
+    if (dateObj.getTime() < startDate) return;
 
     const total_hours = day.total_hours;
 
@@ -30,7 +29,6 @@ export default function handler(req, res) {
     });
   });
 
-  // ترتيب حسب التاريخ
   result.sort((a, b) => new Date(a.date) - new Date(b.date));
 
   res.status(200).json(result);
