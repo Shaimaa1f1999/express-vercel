@@ -4,21 +4,16 @@ export default function handler(req, res) {
 
   const result = [];
 
-  // 🛠 نحول selectdate إلى كائن تاريخ مضبوط
-  const [month, day, year] = input?.selectdate.split("/"); // لو تاريخك جاي كـ MM/DD/YYYY
-  const startDate = new Date(`${year}-${month}-${day}`);
-  const endDate = new Date(startDate);
-  endDate.setDate(endDate.getDate() + 6); // أسبوع بعد البداية
+  // ✅ نستخدم التاريخ اللي اختاره المستخدم كـ بداية فقط
+  const startDate = new Date(input?.selectdate); // مثل 2025-06-17
 
   timelogDates.forEach(day => {
-    const [dMonth, dDay, dYear] = day.date.split("-");
-    const isoDateString = `${dYear}-${dMonth}-${dDay}`;
+    const [month, dayNum, year] = day.date.split("-");
+    const isoDateString = `${year}-${month}-${dayNum}`;
     const dateObj = new Date(isoDateString);
 
-    const dayOfWeek = dateObj.getDay(); // 5 = جمعة, 6 = سبت
-
-    // نتجاهل الجمعة والسبت وخارج النطاق
-    if (dateObj < startDate || dateObj > endDate || dayOfWeek === 5 || dayOfWeek === 6) return;
+    // ✅ رجّع فقط التواريخ اللي >= startDate
+    if (dateObj < startDate) return;
 
     const total_hours = day.total_hours;
 
