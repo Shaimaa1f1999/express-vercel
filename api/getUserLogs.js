@@ -18,30 +18,30 @@ module.exports = async function handler(req, res) {
       return res.status(404).json({ error: "User not found in this project" });
     }
 
-    // نحسب نهاية الأسبوع: start + 6 أيام
-    const startDate = new Date(selectdate);
-    const endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + 6);
+    // تحويل التاريخ من string إلى Date
+    const startDateObj = new Date(selectdate);
+    const endDateObj = new Date(startDateObj);
+    endDateObj.setDate(startDateObj.getDate() + 6); // نضيف 6 أيام
 
-    // نحولها لصيغة MM-DD-YYYY
-    const formatDate = (d) => {
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const yyyy = d.getFullYear();
+    // نحول التاريخ إلى MM-DD-YYYY
+    const formatDate = (date) => {
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
+      const yyyy = date.getFullYear();
       return `${mm}-${dd}-${yyyy}`;
     };
 
-    const start = formatDate(startDate);
-    const end = formatDate(endDate);
+    const startDate = formatDate(startDateObj);
+    const endDate = formatDate(endDateObj);
 
-    const customDateJSON = {
-      start_date: start,
-      end_date: end
+    // نحضر custom_date كـ JSON ونشفره
+    const customDateObj = {
+      start_date: startDate,
+      end_date: endDate
     };
+    const encodedCustomDate = encodeURIComponent(JSON.stringify(customDateObj));
 
-    const encodedCustomDate = encodeURIComponent(JSON.stringify(customDateJSON));
-
-    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs?users_list=${matchedUser.id}&view_type=custom_date&date=${start}&custom_date=${encodedCustomDate}&bill_status=All&component_type=task`;
+    const logsURL = `https://projectsapi.zoho.com/restapi/portal/alnafithait/projects/${projectId}/logs?users_list=${matchedUser.id}&view_type=custom_date&date=${startDate}&custom_date=${encodedCustomDate}&bill_status=All&component_type=task`;
 
     res.json({
       userId: matchedUser.id,
