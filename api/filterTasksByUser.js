@@ -4,7 +4,7 @@ const app = express();
 
 app.use(express.json());
 
-app.post("/filter-tasks", async (req, res) => {
+app.post("/", async (req, res) => {
   const { access_token, tasksURL, userId } = req.body;
 
   if (!access_token || !tasksURL || !userId) {
