@@ -1,48 +1,42 @@
-import axios from "axios";
+export default function handler(req, res) {
+  const input = req.body;
+  const timelogDates = input?.timelogs?.date || [];
+  const userId = input?.userId;
 
-export default async function handler(req, res) {
-  const { access_token, tasksURL, userId } = req.body;
-
-  if (!access_token || !tasksURL || !userId) {
-    return res.status(400).json({ error: "Missing required fields." });
+  if (!userId) {
+    return res.status(400).json({ error: "Missing userId." });
   }
 
-  try {
-    const response = await axios.get(tasksURL, {
-      headers: {
-        Authorization: `Zoho-oauthtoken ${access_token}`
-      }
+  const result = [];
+  const startDate = new Date(input?.selectdate + "T00:00:00").getTime();
+
+  timelogDates.forEach(day => {
+    if (!day?.date) return;
+
+    const [mm, dd, yyyy] = day.date.split("-");
+    const isoDateString = `${yyyy}-${mm.padStart(2, "0")}-${dd}`;
+    const dateObj = new Date(isoDateString + "T00:00:00");
+
+    if (dateObj.getTime() < startDate) return;
+
+    const total_hours = day.total_hours;
+
+    (day.tasklogs || []).forEach(log => {
+      const owners = log?.task?.owners || [];
+      const isUserOwner = owners.some(owner => owner.id === userId);
+
+      if (!isUserOwner) return;
+
+      result.push({
+        date: isoDateString,
+        name: log?.task?.name || '',
+        total_hours,
+        approval_status: log?.approval_status || ''
+      });
     });
+  });
 
-    const allTasks = response.data.tasks || [];
+  result.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    // الفلتر الأول: فقط المهام اللي أنت أحد ملاكها
-    const userTasks = allTasks.filter(task =>
-      task.details?.owners?.some(owner => owner.id === userId)
-    );
-
-    // الفلتر الثاني: فقط المهام الغير مغلقة
-    const openTasks = userTasks.filter(task =>
-      task.status?.name?.toLowerCase() !== "closed"
-    );
-
-    // جهزي البيانات المطلوبة
-    const result = openTasks.map(task => ({
-      id: task.id_string,
-      name: task.name,
-      status: task.status?.name,
-      timesheetURL: task.link?.timesheet?.url,
-      startDate: task.start_date,
-      endDate: task.end_date
-    }));
-
-    res.status(200).json({
-      total: result.length,
-      tasks: result
-    });
-
-  } catch (error) {
-    console.error("Zoho fetch error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Failed to fetch or filter tasks." });
-  }
+  res.status(200).json(result);
 }
