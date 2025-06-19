@@ -6,18 +6,21 @@ export default function handler(req, res) {
   }
 
   try {
-    const filteredTasks = tasks.filter(task => {
-      const owners = task?.details?.owners || [];
-      const hasUser = owners.some(owner => owner?.id?.toString() === userId.toString());
-      const isOpen = task?.status?.name?.toLowerCase() !== "closed";
-      return hasUser && isOpen;
-    });
+    // فلترة المهام اللي ownerId فيها يطابق userId
+    const matchedTasks = tasks.filter(task =>
+      task?.ownerId?.toString() === userId?.toString()
+    );
 
-    const result = filteredTasks.map(task => ({
-      taskId: task.id, // لو عندك ID داخله
-      ownerId: userId,
+    // استبعاد المهام اللي status.name = "Closed"
+    const openTasks = matchedTasks.filter(task =>
+      task?.status?.toLowerCase() !== "closed"
+    );
+
+    // بناء النتيجة
+    const result = openTasks.map(task => ({
+      ownerId: task.ownerId,
       name: task.name,
-      status: task.status?.name
+      status: task.status
     }));
 
     return res.status(200).json({
