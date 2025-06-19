@@ -20,9 +20,19 @@ app.post("/filter-tasks", async (req, res) => {
 
     const allTasks = response.data.tasks || [];
 
-    const filteredTasks = allTasks.filter(task =>
-      task.details?.owners?.some(owner => owner.id === userId)
-    );
+    // فلترة التاسكات اللي فيها اليوزر
+    const filteredTasks = allTasks
+      .filter(task =>
+        task.details?.owners?.some(owner => owner.id === userId)
+      )
+      .map(task => ({
+        id: task.id_string,
+        name: task.name,
+        status: task.status?.name,
+        timesheetURL: task.link?.timesheet?.url,
+        startDate: task.start_date,
+        endDate: task.end_date
+      }));
 
     res.json({
       total: filteredTasks.length,
