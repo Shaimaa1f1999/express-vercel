@@ -6,20 +6,19 @@ export default function handler(req, res) {
   }
 
   try {
-    // فلترة المهام اللي تحتوي على هذا اليوزر كأحد المالكين
-    const filteredTasks = tasks.filter(task =>
-      task?.details?.owners?.some(owner => owner?.id?.toString() === userId?.toString())
+    // فلترة المهام اللي ownerId فيها يطابق userId
+    const matchedTasks = tasks.filter(task =>
+      task?.ownerId?.toString() === userId?.toString()
     );
 
-    // استبعاد المهام اللي status.name فيها "Closed"
-    const openTasks = filteredTasks.filter(task =>
+    // استبعاد المهام اللي status.name = "Closed"
+    const openTasks = matchedTasks.filter(task =>
       task?.status?.name?.toLowerCase() !== "closed"
     );
 
-    // تجهيز الإخراج حسب اللي تبغاه فقط
+    // بناء النتيجة
     const result = openTasks.map(task => ({
-      ownerId: userId,
-      id: task.id_string,
+      ownerId: task.ownerId,
       name: task.name,
       status: task.status?.name
     }));
