@@ -8,10 +8,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await axios.get(tasksURL, {
+    console.log("Received body:", { access_token, tasksURL, userId });
+
+    const response = await axios.get(tasksURL + "?component_type=task", {
       headers: {
         Authorization: `Zoho-oauthtoken ${access_token}`
-      }
+      },
+      timeout: 15000 // احتياطاً
     });
 
     const allTasks = response.data.tasks || [];
@@ -34,7 +37,7 @@ export default async function handler(req, res) {
       tasks: filteredTasks
     });
   } catch (error) {
-    console.error("Zoho fetch error:", error.message);
+    console.error("Zoho fetch error:", error.response?.data || error.message);
     res.status(500).json({ error: "Failed to fetch or filter tasks." });
   }
 }
