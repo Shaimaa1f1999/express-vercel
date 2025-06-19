@@ -16,14 +16,12 @@ export default function handler(req, res) {
       task?.status?.name?.toLowerCase() !== "closed"
     );
 
-    // تجهيز الإخراج
+    // تجهيز الإخراج حسب اللي تبغاه فقط
     const result = openTasks.map(task => ({
+      ownerId: userId,
       id: task.id_string,
       name: task.name,
-      status: task.status?.name,
-      timesheetURL: task.link?.timesheet?.url,
-      startDate: task.start_date,
-      endDate: task.end_date
+      status: task.status?.name
     }));
 
     return res.status(200).json({
