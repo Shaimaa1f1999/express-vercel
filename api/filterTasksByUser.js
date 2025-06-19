@@ -6,26 +6,27 @@ export default function handler(req, res) {
   }
 
   try {
-    // فلترة المهام بناءً على وجود اليوزر ضمن الـ owners
-    const matchedTasks = tasks.filter(task => {
-      const owners = task?.details?.owners || [];
-      const isOwner = owners.some(owner => owner?.id?.toString() === userId.toString());
-      const isNotClosed = task?.status?.toLowerCase() !== "closed";
-      return isOwner && isNotClosed;
-    });
+    // فلترة المهام اللي ownerId فيها يطابق userId
+    const matchedTasks = tasks.filter(task =>
+      task?.ownerId?.toString() === userId?.toString()
+    );
 
-    const result = matchedTasks.map(task => ({
-      taskId: task.id,
+    // استبعاد المهام اللي status.name = "Closed"
+    const openTasks = matchedTasks.filter(task =>
+      task?.status?.toLowerCase() !== "closed"
+    );
+
+    // بناء النتيجة
+    const result = openTasks.map(task => ({
+      ownerId: task.ownerId,
       name: task.name,
-      status: task.status,
-      matchedOwnerId: userId // ترجع فقط اليوزر الحالي
+      status: task.status
     }));
 
     return res.status(200).json({
       total: result.length,
       tasks: result
     });
-
   } catch (err) {
     console.error("Error:", err);
     return res.status(500).json({ error: "Internal server error" });
