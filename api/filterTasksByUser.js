@@ -5,14 +5,14 @@ const app = express();
 app.use(express.json());
 
 app.post("/filter-tasks", async (req, res) => {
-  const { access_token, tasksURL, userId } = req.body;
+  const { access_token, tasksLink, userId } = req.body;
 
-  if (!access_token || !tasksURL || !userId) {
+  if (!access_token || !tasksLink || !userId) {
     return res.status(400).json({ error: "Missing required fields." });
   }
 
   try {
-    const response = await axios.get(tasksURL, {
+    const response = await axios.get(tasksLink, {
       headers: {
         Authorization: `Zoho-oauthtoken ${access_token}`
       }
@@ -20,7 +20,6 @@ app.post("/filter-tasks", async (req, res) => {
 
     const allTasks = response.data.tasks || [];
 
-    // فلترة التاسكات اللي فيها اليوزر
     const filteredTasks = allTasks
       .filter(task =>
         task.details?.owners?.some(owner => owner.id === userId)
