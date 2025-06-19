@@ -1,10 +1,6 @@
-const express = require("express");
-const axios = require("axios");
-const app = express();
+import axios from "axios";
 
-app.use(express.json());
-
-app.post("/", async (req, res) => {
+export default async function handler(req, res) {
   const { access_token, tasksURL, userId } = req.body;
 
   if (!access_token || !tasksURL || !userId) {
@@ -33,14 +29,12 @@ app.post("/", async (req, res) => {
         endDate: task.end_date
       }));
 
-    res.json({
+    res.status(200).json({
       total: filteredTasks.length,
       tasks: filteredTasks
     });
-  } catch (err) {
-    console.error("Error fetching tasks:", err.message);
+  } catch (error) {
+    console.error("Zoho fetch error:", error.message);
     res.status(500).json({ error: "Failed to fetch or filter tasks." });
   }
-});
-
-module.exports = app;
+}
