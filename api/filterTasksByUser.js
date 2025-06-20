@@ -1,6 +1,7 @@
 export default function handler(req, res) {
-  const { tasks } = req.body;
-  const userId = req.query.userId;
+const body = req.body.body || req.body; // يتأكد من nesting
+const { tasks } = body;
+const userId = req.query.userId;
 
   if (!userId || !Array.isArray(tasks)) {
     return res.status(400).json({ error: "Missing userId or tasks array" });
