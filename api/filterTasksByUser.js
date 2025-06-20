@@ -7,17 +7,19 @@ export default function handler(req, res) {
   }
 
   try {
+    const userIdStr = userId.toString(); // نحفظه مرة واحدة بدل ما نعيد التكرار
+
     const result = tasks.reduce((acc, task) => {
       const owners = task?.details?.owners || [];
-      const ownerIds = owners
-        .filter(owner => owner.id.toString() === userId.toString())
-        .map(owner => owner.id);
 
-      if (ownerIds.length > 0 && task.status?.name?.toLowerCase() !== "closed") {
+      // نوقف أول ما نلاقي match، ما نكمل تمشي على الباقين
+      const ownerMatch = owners.find(owner => owner.id?.toString() === userIdStr);
+
+      if (ownerMatch && task.status?.name?.toLowerCase() !== "closed") {
         acc.push({
           name: task.name,
           status: task.status?.name || "Unknown",
-          owners: ownerIds,
+          ownerId: ownerMatch.id,
         });
       }
 
