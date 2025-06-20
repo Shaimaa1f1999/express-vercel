@@ -1,32 +1,30 @@
 export default function handler(req, res) {
-  const { userId, tasks } = req.body;
+  const { tasks } = req.body;
+  const userId = req.query.userId;
 
   if (!userId || !Array.isArray(tasks)) {
     return res.status(400).json({ error: "Missing userId or tasks array" });
   }
 
   try {
-    // فلترة المهام اللي ownerId فيها يطابق userId
-    const matchedTasks = tasks.filter(task =>
-      task?.ownerId?.toString() === userId?.toString()
-    );
+    const matchedTasks = tasks
+      .map(task => {
+        const owners = task?.details?.owners || [];
+        const matchedOwner = owners.find(owner => owner.id.toString() === userId.toString());
 
-    // استبعاد المهام اللي status.name = "Closed"
-    const openTasks = matchedTasks.filter(task =>
-      task?.status?.toLowerCase() !== "closed"
-    );
+        if (matchedOwner) {
+          return {
+            id: matchedOwner.id,
+            name: task.name,
+            status: task.status?.name || "Unknown"
+          };
+        }
 
-    // بناء النتيجة
-    const result = openTasks.map(task => ({
-      ownerId: task.ownerId,
-      name: task.name,
-      status: task.status
-    }));
+        return null;
+      })
+      .filter(task => task !== null);
 
-    return res.status(200).json({
-      total: result.length,
-      tasks: result
-    });
+    return res.status(200).json({ body: matchedTasks });
   } catch (err) {
     console.error("Error:", err);
     return res.status(500).json({ error: "Internal server error" });
