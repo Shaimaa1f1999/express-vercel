@@ -7,24 +7,24 @@ export default function handler(req, res) {
   }
 
   try {
-    const matchedTasks = tasks
-      .map(task => {
-        const owners = task?.details?.owners || [];
-        const matchedOwner = owners.find(owner => owner.id.toString() === userId.toString());
+    const result = tasks.reduce((acc, task) => {
+      const owners = task?.details?.owners || [];
+      const ownerIds = owners
+        .filter(owner => owner.id.toString() === userId.toString())
+        .map(owner => owner.id);
 
-        if (matchedOwner && task.status?.name?.toLowerCase() !== "closed") {
-          return {
-            id: matchedOwner.id,
-            name: task.name,
-            status: task.status?.name || "Unknown"
-          };
-        }
+      if (ownerIds.length > 0 && task.status?.name?.toLowerCase() !== "closed") {
+        acc.push({
+          name: task.name,
+          status: task.status?.name || "Unknown",
+          owners: ownerIds,
+        });
+      }
 
-        return null;
-      })
-      .filter(task => task !== null);
+      return acc;
+    }, []);
 
-    return res.status(200).json({ body: matchedTasks });
+    return res.status(200).json({ body: result });
   } catch (err) {
     console.error("Error:", err);
     return res.status(500).json({ error: "Internal server error" });
