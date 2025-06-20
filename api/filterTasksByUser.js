@@ -12,7 +12,7 @@ export default function handler(req, res) {
         const owners = task?.details?.owners || [];
         const matchedOwner = owners.find(owner => owner.id.toString() === userId.toString());
 
-        if (matchedOwner) {
+        if (matchedOwner && task.status?.name?.toLowerCase() !== "closed") {
           return {
             id: matchedOwner.id,
             name: task.name,
