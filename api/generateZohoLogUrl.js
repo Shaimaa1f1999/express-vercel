@@ -15,10 +15,12 @@ export default function handler(req, res) {
     }
 
     const taskId = matchedTask.taskId || matchedTask.id_string;
+    const ownerId = matchedTask.ownerId || null;
 
     return res.status(200).json({
       taskId,
-      message: `✅ Task ID for "${taskName}" found successfully.`
+      ownerId,
+      message: `✅ Task ID and Owner ID for "${taskName}" found successfully.`
     });
 
   } catch (error) {
