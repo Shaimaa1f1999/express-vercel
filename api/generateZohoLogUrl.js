@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     note,
     billStatus,
     tasks,
-    accessToken // أرسلي التوكن مع الطلب
+    accessToken
   } = req.body;
 
   if (!projectId || !taskName || !logDate || !totalHour || !billStatus || !Array.isArray(tasks) || !accessToken) {
@@ -47,7 +47,9 @@ export default async function handler(req, res) {
       }
     });
 
-    return res.status(200).json({ message: "تم تسجيل الساعات بنجاح ✅" });
+    return res.status(200).json({
+      message: `✅ تم تسجيل الساعات بنجاح لتاسك: "${taskName}" بتاريخ ${logDate} لمدة ${totalHour}`
+    });
 
   } catch (error) {
     console.error(error.response?.data || error.message);
