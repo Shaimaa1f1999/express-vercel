@@ -17,6 +17,7 @@ export default function handler(req, res) {
 
       if (ownerMatch && task.status?.name?.toLowerCase() !== "closed") {
         acc.push({
+          taskId: task.id_string,
           name: task.name,
           status: task.status?.name || "Unknown",
           ownerId: ownerMatch.id,
