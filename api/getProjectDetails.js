@@ -14,6 +14,7 @@ export default function handler(req, res) {
     manager: matched.manager,
     startDate: matched.startDate,
     endDate: matched.endDate,
-    status: matched.status
+    status: matched.status,
+    id_string: matched.id_string
   });
 }
