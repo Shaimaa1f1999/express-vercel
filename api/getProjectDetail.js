@@ -13,6 +13,5 @@ export default function handler(req, res) {
     projectName: matched.projectName,
     id_string: matched.id_string,
     userURL: matched.userURL,
-    id_string_explicit: matched.id_string // الإضافة الجديدة فقط
   });
 }
