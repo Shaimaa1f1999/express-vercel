@@ -3,7 +3,6 @@ export default function handler(req, res) {
 
   const matched = projects.find(
     (p) => p.name.trim().toLowerCase() === targetProjectName.trim().toLowerCase()
-
   );
 
   if (!matched) {
@@ -14,5 +13,6 @@ export default function handler(req, res) {
     projectName: matched.projectName,
     id_string: matched.id_string,
     userURL: matched.userURL,
+    id_string_explicit: matched.id_string // الإضافة الجديدة فقط
   });
 }
