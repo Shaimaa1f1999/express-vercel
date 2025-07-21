@@ -1,23 +1,20 @@
 export default async function handler(req, res) {
   const { posts } = req.body;
 
-  // فلترة فقط الرسائل العادية
   const messagePosts = posts
     .filter(post => post.messageType === 'message')
     .sort((a, b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
 
   if (messagePosts.length === 0) {
-    return res.status(200).json({ status: 'no_posts_found' });
+    return res.status(204).end(); // لا ترجع شيء
   }
 
   const lastPost = messagePosts[0];
-
   const teamId = lastPost.channelIdentity?.teamId;
   const channelId = lastPost.channelIdentity?.channelId;
   const messageId = lastPost.id;
 
   const repliesEndpoint = `https://graph.microsoft.com/v1.0/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies`;
-
   const token = process.env.GRAPH_TOKEN;
 
   let replyData;
@@ -29,16 +26,16 @@ export default async function handler(req, res) {
     });
 
     if (response.status === 401) {
-      return res.status(200).json({ status: 'unauthorized', error: 'Invalid or expired token' });
+      return res.status(204).end(); // Unauthorized: برضو لا ترجع شيء
     }
 
     replyData = await response.json();
 
     if (!Array.isArray(replyData?.value)) {
-      return res.status(200).json({ status: 'invalid_response', data: replyData });
+      return res.status(204).end(); // استجابة مش طبيعية
     }
   } catch (error) {
-    return res.status(500).json({ status: 'fetch_error', error: error.message });
+    return res.status(204).end(); // فشل جلب الردود
   }
 
   const replies = replyData.value;
@@ -51,10 +48,9 @@ export default async function handler(req, res) {
   const foundKeyword = keywords.some(keyword => lastReplyText.includes(keyword));
 
   if (!foundKeyword) {
-    return res.status(200).json({ status: 'no_keyword_triggered' });
+    return res.status(204).end(); // ما انطلب تايم لاين
   }
 
-  // ⏱ Formatting utils
   const formatTimeKSA = (isoDate) => {
     const date = new Date(isoDate);
     return date.toLocaleTimeString('en-GB', {
@@ -85,7 +81,6 @@ export default async function handler(req, res) {
     });
   };
 
-  // 🧠 Build timeline
   const timelineLines = replies
     .filter(r => r?.body?.content)
     .sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime))
@@ -93,7 +88,7 @@ export default async function handler(req, res) {
       const time = formatTimeKSA(reply.createdDateTime);
       const date = formatDateOnlyKSA(reply.createdDateTime);
       const content = reply.body.content
-        .replace(/<\/?[^>]+(>|$)/g, '') // remove HTML tags
+        .replace(/<\/?[^>]+(>|$)/g, '')
         .replace(/\n/g, ' ')
         .trim();
       return `• ${time} KSA – ${content}\n  📅 ${date}`;
