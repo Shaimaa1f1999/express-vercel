@@ -15,7 +15,9 @@ export default async function handler(req, res) {
   const messageId = lastPost.id;
 
   const repliesEndpoint = `https://graph.microsoft.com/v1.0/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies`;
-  const token = process.env.GRAPH_TOKEN;
+
+  // 🔥 تم إدخال التوكن يدوياً هنا مؤقتاً
+  const token = 'eyJ0eXAiOiJKV1QiLCJub25jZSI6IjVETmV2NjRoV2puYzVBdS1IMDlBY0Z4YzNEU1hSd013LVVDQ3hCREhDNVUiLCJhbGciOiJSUzI1NiIsIng1dCI6Il9qTndqZVNudlRUSzhYRWRyNVFVUGtCUkxMbyIsImtpZCI6Il9qTndqZVNudlRUSzhYRWRyNVFVUGtCUkxMbyJ9.eyJ...الخ';
 
   let replyData;
   try {
