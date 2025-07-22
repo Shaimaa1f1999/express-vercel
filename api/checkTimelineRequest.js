@@ -1,5 +1,7 @@
 export default async function handler(req, res) {
   try {
+    console.log("body:", req.body); // هذا هو السطر اللي أضفناه
+
     const posts = req.body.posts;
 
     if (!posts || !Array.isArray(posts) || posts.length === 0) {
