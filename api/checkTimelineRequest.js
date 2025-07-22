@@ -1,109 +1,36 @@
 export default async function handler(req, res) {
-  const { posts } = req.body;
-
-  const messagePosts = posts
-    .filter(post => post.messageType === 'message')
-    .sort((a, b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
-
-  if (messagePosts.length === 0) {
-    return res.status(204).end(); // لا ترجع شيء
-  }
-
-  const lastPost = messagePosts[0];
-  const teamId = lastPost.channelIdentity?.teamId;
-  const channelId = lastPost.channelIdentity?.channelId;
-  const messageId = lastPost.id;
-
-  const repliesEndpoint = `https://graph.microsoft.com/v1.0/teams/${teamId}/channels/${channelId}/messages/${messageId}/replies`;
-
-  // 🔥 تم إدخال التوكن يدوياً هنا مؤقتاً
-  const token = 'eyJ0eXAiOiJKV1QiLCJub25jZSI6IjVETmV2NjRoV2puYzVBdS1IMDlBY0Z4YzNEU1hSd013LVVDQ3hCREhDNVUiLCJhbGciOiJSUzI1NiIsIng1dCI6Il9qTndqZVNudlRUSzhYRWRyNVFVUGtCUkxMbyIsImtpZCI6Il9qTndqZVNudlRUSzhYRWRyNVFVUGtCUkxMbyJ9.eyJ...الخ';
-
-  let replyData;
   try {
-    const response = await fetch(repliesEndpoint, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    const posts = req.body.posts;
 
-    if (response.status === 401) {
-      return res.status(204).end(); // Unauthorized: برضو لا ترجع شيء
+    if (!posts || !Array.isArray(posts) || posts.length === 0) {
+      return res.status(400).json({ error: "No posts found in request body" });
     }
 
-    replyData = await response.json();
+    // فلترة فقط الرسائل العادية (مو system events)
+    const messages = posts.filter(p => p.messageType === "message");
 
-    if (!Array.isArray(replyData?.value)) {
-      return res.status(204).end(); // استجابة مش طبيعية
+    if (messages.length === 0) {
+      return res.status(200).json({ message: "No message-type posts found" });
     }
-  } catch (error) {
-    return res.status(204).end(); // فشل جلب الردود
+
+    // ترتيبهم حسب الوقت تنازلي
+    messages.sort((a, b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
+
+    // أخذ أحدث بوست
+    const latest = messages[0];
+
+    const result = {
+      author: latest?.from?.user?.displayName || "Unknown",
+      content: latest?.body?.content || "",
+      createdAt: latest?.createdDateTime,
+      link: latest?.webUrl,
+      subject: latest?.subject || "(no subject)"
+    };
+
+    return res.status(200).json(result);
+
+  } catch (err) {
+    console.error("Error in checkTimelineRequest:", err);
+    return res.status(500).json({ error: "Server error" });
   }
-
-  const replies = replyData.value;
-
-  const keywords = ['timeline', 'تايم لاين', 'give me timeline'];
-  const lastReplyText = replies
-    .sort((a, b) => new Date(b.createdDateTime) - new Date(a.createdDateTime))
-    ?.at(0)?.body?.content?.toLowerCase() || '';
-
-  const foundKeyword = keywords.some(keyword => lastReplyText.includes(keyword));
-
-  if (!foundKeyword) {
-    return res.status(204).end(); // ما انطلب تايم لاين
-  }
-
-  const formatTimeKSA = (isoDate) => {
-    const date = new Date(isoDate);
-    return date.toLocaleTimeString('en-GB', {
-      timeZone: 'Asia/Riyadh',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const formatDateOnlyKSA = (isoDate) => {
-    const date = new Date(isoDate);
-    return date.toLocaleDateString('en-GB', {
-      timeZone: 'Asia/Riyadh',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
-
-  const formatFullDateHeader = (isoDate) => {
-    const date = new Date(isoDate);
-    return date.toLocaleDateString('en-GB', {
-      timeZone: 'Asia/Riyadh',
-      weekday: 'long',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
-
-  const timelineLines = replies
-    .filter(r => r?.body?.content)
-    .sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime))
-    .map(reply => {
-      const time = formatTimeKSA(reply.createdDateTime);
-      const date = formatDateOnlyKSA(reply.createdDateTime);
-      const content = reply.body.content
-        .replace(/<\/?[^>]+(>|$)/g, '')
-        .replace(/\n/g, ' ')
-        .trim();
-      return `• ${time} KSA – ${content}\n  📅 ${date}`;
-    });
-
-  const reply = `🕓 **Incident Timeline**\n**${formatFullDateHeader(replies[0]?.createdDateTime)}**\n\n${timelineLines.join('\n\n')}`;
-
-  return res.status(200).json([
-    {
-      teamId,
-      channelId,
-      messageId,
-      reply
-    }
-  ]);
 }
