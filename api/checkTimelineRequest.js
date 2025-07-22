@@ -9,12 +9,27 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "No posts found in request body" });
     }
 
-    // فلترة فقط الرسائل العادية
-    const messages = posts.filter(p => p.messageType === "message");
-    console.log("📝 Filtered messages:", messages);
+    // نجمع كل الرسائل العادية سواء كانت post أو reply
+    const messages = [];
+
+    posts.forEach(post => {
+      if (post.messageType === "message") {
+        messages.push(post);
+      }
+
+      if (Array.isArray(post.replies)) {
+        post.replies.forEach(reply => {
+          if (reply.messageType === "message") {
+            messages.push(reply);
+          }
+        });
+      }
+    });
+
+    console.log("📝 All message-type posts & replies:", messages);
 
     if (messages.length === 0) {
-      console.log("⚠️ No message-type posts found");
+      console.log("⚠️ No message-type posts found (including replies)");
       return res.status(200).json({ message: "No message-type posts found" });
     }
 
