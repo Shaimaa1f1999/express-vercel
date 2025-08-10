@@ -63,25 +63,29 @@ export default async function handler(req, res) {
       "ModifiedBy","ModifiedTime","Employee1",
       "Compleation_Date","Training_Name","Description","Type",
       "Proof_of_Execution_Document","Proof_of_Execution",
-      "Training_Request","Employee1.ID","ApprovalStatus","ApprovalTime","Proof_of_Execution_Document_downloadUrl",
-      "Trainee","Trainee.ID","AddedBy.ID","ModifiedBy.ID","CreatedTime","Zoho_ID","Training_Request.ID"
+      "Training_Request","Employee1.ID","ApprovalStatus","ApprovalTime"
     ];
     const allHeaders = Array.from(headerSet);
     const rest = allHeaders.filter(h => !preferred.includes(h)).sort((a,b)=>a.localeCompare(b));
     const headers = [...preferred.filter(h => headerSet.has(h)), ...rest];
 
     const renameMap = {
+  "RecordId": "ZOHO_LINK_ID",
+  "Reference_Number": "Reference Number",
+  "AddedBy": "Added By",
+  "AddedTime": "Added Time",
+  "ModifiedBy": "Modified By",
+  "ModifiedTime": "Modified Time",
+  "Employee1": "Employee",
   "Compleation_Date": "Completion Date",
   "Training_Name": "Training Name",
   "Proof_of_Execution_Document": "Proof of Execution Document",
-  "Proof_of_Execution_Document_downloadUrl": "Proof of Execution Document Download URL",
-  "AddedBy": "Added By",
-  "ModifiedBy": "Modified By",
+  "Proof_of_Execution": "Proof of Execution",
+  "Training_Request":  "Training Request",
   "ApprovalStatus": "Approval Status",
+ 
   "ApprovalTime": "Approval Time",
-  "Reference_Number": "Reference Number",
-  "Employee1": "Employee",
-  "Employee1.ID": "Employee ID",
+  
   // add as many as you want...
 };
 
