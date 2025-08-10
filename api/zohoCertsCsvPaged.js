@@ -59,12 +59,12 @@ export default async function handler(req, res) {
 
     // ترتيب أعمدة مفيد أولاً ثم الباقي أبجديًا
     const preferred = [
-      "RecordId","Reference_Number","Training_Name","Type","Proof_of_Execution",
-      "Proof_of_Execution_Document","Proof_of_Execution_Document_downloadUrl",
-      "Compleation_Date","ApprovalStatus","ApprovalTime","Employee1","Employee1.ID",
-      "Trainee","Trainee.ID","AddedTime","AddedBy","AddedBy.ID","ModifiedTime",
-      "ModifiedBy","ModifiedBy.ID","CreatedTime","Zoho_ID","Description",
-      "Training_Request","Training_Request.ID"
+    "RecordId","Reference_Number","AddedBy","AddedTime",
+      "ModifiedBy","ModifiedTime","Employee1",
+      "Compleation_Date","Training_Name","Description","Type",
+      "Proof_of_Execution_Document","Proof_of_Execution",
+      "Training_Request","Employee1.ID","ApprovalStatus","ApprovalTime","Proof_of_Execution_Document_downloadUrl",
+      "Trainee","Trainee.ID","AddedBy.ID","ModifiedBy.ID","CreatedTime","Zoho_ID","Training_Request.ID"
     ];
     const allHeaders = Array.from(headerSet);
     const rest = allHeaders.filter(h => !preferred.includes(h)).sort((a,b)=>a.localeCompare(b));
