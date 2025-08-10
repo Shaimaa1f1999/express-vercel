@@ -1,4 +1,4 @@
-// api/zohoCertsCsvPaged.js
+// api/zohoCertsCsvPaged.j
 // POST body: { url: "https://people.zoho.com/people/api/forms/.../getRecords", token: "...", limit: 100 }
 
 export default async function handler(req, res) {
