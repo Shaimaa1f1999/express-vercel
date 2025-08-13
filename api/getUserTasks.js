@@ -3,14 +3,14 @@
 
 export default async function handler(req, res) {
   try {
-    const url   = req.body?.url;
-    const token = req.body?.token;
-    const limit = Number(req.body?.limit ?? 100);
+    const url   = req.body?.url;                      // base url بدون sIndex/limit
+    const token = req.body?.token;                    // OAuth access_token
+    const limit = Number(req.body?.limit ?? 100);     // 100 أو 200 حسب رغبتك
     if (!url || !token) {
       return res.status(400).json({ error: "url and token are required" });
     }
 
-    // إعادة المحاولة البسيطة لو 429
+    // بسيطة: إعادة المحاولة لو 429 (rate limit)
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     async function fetchPage(sIndex, attempt = 1) {
       const u = `${url}${url.includes("?") ? "&" : "?"}sIndex=${sIndex}&limit=${limit}`;
@@ -36,11 +36,11 @@ export default async function handler(req, res) {
       const batch = data?.response?.result;
       if (!Array.isArray(batch) || batch.length === 0) break;
       all.push(...batch);
-      if (batch.length < limit) break;
-      sIndex += limit;
+      if (batch.length < limit) break;      // أقل من الحد؟ آخر صفحة
+      sIndex += limit;                      // الصفحة التالية
     }
 
-    // لو فاضي
+    // الأعمدة المطلوبة فقط (وبهذا الترتيب)
     const wantedHeaders = [
       "EmailID",
       "Department",
@@ -56,11 +56,13 @@ export default async function handler(req, res) {
       "EmployeeID",
       "Full_Name_AR"
     ];
+
+    // لو ما فيه بيانات يرجّع CSV بالهيدر المطلوب فقط
     if (all.length === 0) {
-      return sendCsv(res, wantedHeaders, []); // CSV فاضي مع الهيدر المطلوب
+      return sendCsv(res, wantedHeaders, []);
     }
 
-    // util: جلب قيمة مسار dot-case مع تجاهل حالة الأحرف
+    // util: جلب قيمة مسار dot-path مع تجاهل حالة الأحرف (Upper/Lower)
     function getPathCaseInsensitive(obj, path) {
       if (!obj || typeof obj !== "object") return undefined;
       const segs = String(path).split(".");
@@ -71,23 +73,20 @@ export default async function handler(req, res) {
         const matchKey = Object.keys(cur).find(k => k.toLowerCase() === lc);
         if (!matchKey) return undefined;
         cur = cur[matchKey];
-        // لو كان array ونبغى أول عنصر (زوشو أحياناً يرجّع مصفوفة)
-        if (Array.isArray(cur)) cur = cur[0];
+        if (Array.isArray(cur)) cur = cur[0]; // Zoho أحياناً يرجّع مصفوفة
       }
       return cur;
     }
 
-    // util: تحويل القيمة لنص مناسب للـ CSV
+    // util: تحويل أي قيمة لنص مناسب للـ CSV
     function coerceVal(v) {
       if (v == null) return "";
       if (Array.isArray(v)) {
-        // حوّل العناصر لنصوص مفهومة
         return v.map(x => coerceVal(x)).join(" | ");
       }
       if (typeof v === "object") {
-        // قيم شائعة في Zoho: displayValue / name / MailID / ID
         const keys = Object.keys(v);
-        const has = (k) => keys.some(x => x.toLowerCase() === k.toLowerCase());
+        const has  = (k) => keys.some(x => x.toLowerCase() === k.toLowerCase());
         const pick = (k) => v[keys.find(x => x.toLowerCase() === k.toLowerCase())];
 
         if (has("displayValue")) return String(pick("displayValue") ?? "");
@@ -95,47 +94,29 @@ export default async function handler(req, res) {
         if (has("MailID"))       return String(pick("MailID") ?? "");
         if (has("ID"))           return String(pick("ID") ?? "");
         if (has("id"))           return String(pick("id") ?? "");
-        // آخر حل: JSON مضغوط
         try { return JSON.stringify(v); } catch { return String(v); }
       }
       return String(v);
     }
 
-    // حضّر الصفوف: فكّ هيكلة استجابة Zoho بالشكل المستخدم عندك
-    const rawRows = [];
+    // فك هيكلة رد Zoho، وبَسّ بْنِي الأعمدة المطلوبة (فلترة قبل الإخراج)
+    const filteredRows = [];
     for (const item of all) {
       if (!item || typeof item !== "object") continue;
-      const recordId = Object.keys(item)[0]; // نفس منطقك السابق
-      const arr = item[recordId] ?? [];
+      const recordIdKey = Object.keys(item)[0];          // غالباً RecordId
+      const arr = item[recordIdKey] ?? [];
       const fields = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
-      rawRows.push(fields);
-    }
 
-    // بِنِ قيم الأعمدة المطلوبة فقط + إزالة تكرارات محتملة (case-insensitive)
-    const seen = new Set();
-    const rows = [];
-    for (const rec of rawRows) {
+      // نشكّل صف يحتوي فقط على الأعمدة المطلوبة
       const row = {};
-      for (const colPath of wantedHeaders) {
-        const val = getPathCaseInsensitive(rec, colPath);
-        row[colPath] = coerceVal(val);
+      for (const col of wantedHeaders) {
+        row[col] = coerceVal(getPathCaseInsensitive(fields, col));
       }
-
-      // مفتاح التكرار: EmployeeID > EmailID > Full_Name (كلها lower-case)
-      const dedupeKey = [
-        row["EmployeeID"] || "",
-        row["EmailID"] || "",
-        row["Full_Name"] || ""
-      ].join("|").toLowerCase();
-
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-
-      rows.push(row);
+      filteredRows.push(row);
     }
 
-    // أرسل CSV
-    return sendCsv(res, wantedHeaders, rows);
+    // أرسل CSV بهذه الأعمدة فقط
+    return sendCsv(res, wantedHeaders, filteredRows);
 
   } catch (e) {
     return res.status(500).json({ error: e?.message || "failed" });
@@ -150,7 +131,7 @@ function sendCsv(res, headers, rows) {
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [];
-  lines.push(headers.map(esc).join(","));
+  lines.push(headers.map(esc).join(",")); // الهيدر بالترتيب المطلوب
   for (const r of rows) {
     lines.push(headers.map(h => esc(r[h])).join(","));
   }
