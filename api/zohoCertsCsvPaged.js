@@ -63,7 +63,7 @@ export default async function handler(req, res) {
       "ModifiedBy","ModifiedTime","Employee1",
       "Compleation_Date","Training_Name","Description","Type",
       "Proof_of_Execution_Document","Proof_of_Execution",
-      "Training_Request","Employee1.ID","ApprovalStatus","ApprovalTime"
+      "Training_Request","Employee1.ID","ApprovalStatus","ApprovalTime","Email_ID"
     ];
     const allHeaders = Array.from(headerSet);
     const rest = allHeaders.filter(h => !preferred.includes(h)).sort((a,b)=>a.localeCompare(b));
