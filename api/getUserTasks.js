@@ -10,7 +10,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "url and token are required" });
     }
 
-    // بسيطة: إعادة المحاولة لو 429 (rate limit)
+    // إعادة المحاولة لو 429
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     async function fetchPage(sIndex, attempt = 1) {
       const u = `${url}${url.includes("?") ? "&" : "?"}sIndex=${sIndex}&limit=${limit}`;
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
       const batch = data?.response?.result;
       if (!Array.isArray(batch) || batch.length === 0) break;
       all.push(...batch);
-      if (batch.length < limit) break;      // أقل من الحد؟ آخر صفحة
+      if (batch.length < limit) break;      // آخر صفحة
       sIndex += limit;                      // الصفحة التالية
     }
 
@@ -57,38 +57,29 @@ export default async function handler(req, res) {
       "Full_Name_AR"
     ];
 
-    // لو ما فيه بيانات يرجّع CSV بالهيدر المطلوب فقط
     if (all.length === 0) {
-      return sendCsv(res, wantedHeaders, []);
+      return sendCsv(res, wantedHeaders, []); // هيدر فقط
     }
 
-    // util: جلب قيمة مسار dot-path مع تجاهل حالة الأحرف (Upper/Lower)
-    function getPathCaseInsensitive(obj, path) {
+    // دالة: طابق المفتاح كما هو (بدون تعشيق)، case-insensitive على المستوى الأول فقط
+    function getKeyCaseInsensitive(obj, key) {
       if (!obj || typeof obj !== "object") return undefined;
-      const segs = String(path).split(".");
-      let cur = obj;
-      for (const seg of segs) {
-        if (cur == null) return undefined;
-        const lc = seg.toLowerCase();
-        const matchKey = Object.keys(cur).find(k => k.toLowerCase() === lc);
-        if (!matchKey) return undefined;
-        cur = cur[matchKey];
-        if (Array.isArray(cur)) cur = cur[0]; // Zoho أحياناً يرجّع مصفوفة
-      }
-      return cur;
+      const target = String(key).toLowerCase();
+      const match  = Object.keys(obj).find(k => k.toLowerCase() === target);
+      if (!match) return undefined;
+      let v = obj[match];
+      if (Array.isArray(v)) v = v[0]; // Zoho أحيانًا يرجّع Array
+      return v;
     }
 
-    // util: تحويل أي قيمة لنص مناسب للـ CSV
+    // دالة: نزبط القيمة للـ CSV
     function coerceVal(v) {
       if (v == null) return "";
-      if (Array.isArray(v)) {
-        return v.map(x => coerceVal(x)).join(" | ");
-      }
+      if (Array.isArray(v)) return v.map(x => coerceVal(x)).join(" | ");
       if (typeof v === "object") {
         const keys = Object.keys(v);
         const has  = (k) => keys.some(x => x.toLowerCase() === k.toLowerCase());
         const pick = (k) => v[keys.find(x => x.toLowerCase() === k.toLowerCase())];
-
         if (has("displayValue")) return String(pick("displayValue") ?? "");
         if (has("name"))         return String(pick("name") ?? "");
         if (has("MailID"))       return String(pick("MailID") ?? "");
@@ -99,24 +90,21 @@ export default async function handler(req, res) {
       return String(v);
     }
 
-    // فك هيكلة رد Zoho، وبَسّ بْنِي الأعمدة المطلوبة (فلترة قبل الإخراج)
-    const filteredRows = [];
+    // نبني صفوف فيها فقط الأعمدة المطلوبة (بدون أي تعشيق)
+    const rows = [];
     for (const item of all) {
       if (!item || typeof item !== "object") continue;
-      const recordIdKey = Object.keys(item)[0];          // غالباً RecordId
-      const arr = item[recordIdKey] ?? [];
+      const recordIdKey = Object.keys(item)[0];           // غالباً RecordId
+      const arr    = item[recordIdKey] ?? [];
       const fields = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
-
-      // نشكّل صف يحتوي فقط على الأعمدة المطلوبة
       const row = {};
       for (const col of wantedHeaders) {
-        row[col] = coerceVal(getPathCaseInsensitive(fields, col));
+        row[col] = coerceVal(getKeyCaseInsensitive(fields, col));
       }
-      filteredRows.push(row);
+      rows.push(row);
     }
 
-    // أرسل CSV بهذه الأعمدة فقط
-    return sendCsv(res, wantedHeaders, filteredRows);
+    return sendCsv(res, wantedHeaders, rows);
 
   } catch (e) {
     return res.status(500).json({ error: e?.message || "failed" });
@@ -132,9 +120,7 @@ function sendCsv(res, headers, rows) {
   };
   const lines = [];
   lines.push(headers.map(esc).join(",")); // الهيدر بالترتيب المطلوب
-  for (const r of rows) {
-    lines.push(headers.map(h => esc(r[h])).join(","));
-  }
+  for (const r of rows) lines.push(headers.map(h => esc(r[h])).join(","));
   const csv = lines.join("\r\n");
 
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
