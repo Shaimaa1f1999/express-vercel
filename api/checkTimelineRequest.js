@@ -1,22 +1,24 @@
 // api/zohoCertsCsvPaged.js
 // POST body: { 
-//   url:"https://people.zoho.com/people/api/forms/.../getRecords", 
-//   token:"...", 
-//   limit:100, 
+//   url:"https://people.zoho.com/people/api/forms/.../getRecords",
+//   token:"...",
+//   limit:100,
 //   fileName:"export.csv",
-//   photoField:"Photo"           // اسم العمود اللي فيه رابط viewEmployeePhoto (اختياري)
+//   photoField:"Photo",       // اسم الحقل اللي فيه رابط viewEmployeePhoto (اختياري)
+//   emailField:"EmailID"      // اسم حقل الإيميل (اختياري، الافتراضي EmailID)
 // }
 
 export default async function handler(req, res) {
   try {
-    const url       = req.body?.url;                   // base url بدون sIndex/limit
-    const token     = req.body?.token;                 // OAuth access_token
-    const limit     = Number(req.body?.limit ?? 100);  // 100 أو 200
-    const fileName  = req.body?.fileName ?? "export.csv";
-    const photoField= req.body?.photoField ?? "Photo"; // العمود المصدر للصورة
+    const url        = req.body?.url;
+    const token      = req.body?.token;
+    const limit      = Number(req.body?.limit ?? 100);
+    const fileName   = req.body?.fileName ?? "export.csv";
+    const photoField = req.body?.photoField ?? "Photo";
+    const emailField = req.body?.emailField ?? "EmailID";
     if (!url || !token) return res.status(400).json({ error: "url and token are required" });
 
-    // إعادة المحاولة لو 429
+    // retry 429
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     async function fetchPage(sIndex, attempt = 1) {
       const u = `${url}${url.includes("?") ? "&" : "?"}sIndex=${sIndex}&limit=${limit}`;
@@ -26,42 +28,36 @@ export default async function handler(req, res) {
       return r.json();
     }
 
-    // تجميع الصفحات
-    let sIndex = Number(req.body?.start ?? 0); // ابدأ من 0
-    const all = [];
+    // جمع كل الصفحات
+    let sIndex = Number(req.body?.start ?? 0);
+    const flatRows = [];
     while (true) {
       const data  = await fetchPage(sIndex);
       const batch = data?.response?.result;
       if (!Array.isArray(batch) || batch.length === 0) break;
-      all.push(...batch);
+      for (const item of batch) {
+        if (!item || typeof item !== "object") continue;
+        const recordId = Object.keys(item)[0];
+        const arr      = item[recordId] ?? [];
+        const fields   = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
+        flatRows.push({ RecordId: recordId, ...fields });
+      }
       if (batch.length < limit) break;
       sIndex += limit;
     }
 
-    if (all.length === 0) return res.status(200).send("RecordId\n"); // CSV فاضي
-
-    // تسطيح بسيط + بناء الهيدر (بدون أي ترتيب خاص)
-    const rows = [];
-    const headerSet = new Set(["RecordId"]);
-    for (const item of all) {
-      if (!item || typeof item !== "object") continue;
-      const recordId = Object.keys(item)[0];
-      const arr      = item[recordId] ?? [];
-      const fields   = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
-      const row      = { RecordId: recordId, ...fields };
-      Object.keys(row).forEach(k => headerSet.add(k));
-      rows.push(row);
+    // لو ما فيه بيانات: رجّع هيدر العمودين فقط
+    if (flatRows.length === 0) {
+      const emptyCsv = "EmailID,PhotoDataUri\r\n";
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
+      return res.status(200).send(emptyCsv);
     }
 
-    // —— إضافة عمود صورة كـ Data URI ——
-    // 1) حضّري الهيدر
-    headerSet.add("PhotoDataUri");       // العمود الجديد للعرض في Power BI
-    const headers = Array.from(headerSet);
-
-    // 2) دالة تسحب الصورة وترجع data URI  (مع Content-Type الصحيح)
+    // دالة تجيب الصورة وترجعها Data URI (image/jpeg فقط)
     async function fetchPhotoDataUri(photoUrl) {
       if (!photoUrl || typeof photoUrl !== "string") return "";
-      // استخرج filename=... سواء كان URL صالح أو نص
+      // استخرج filename
       let filename = "";
       try {
         const u = new URL(photoUrl);
@@ -76,45 +72,39 @@ export default async function handler(req, res) {
         `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`,
         { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
       );
-      if (!r.ok) return ""; // لا توقف التصدير بسبب صورة فاشلة
+      if (!r.ok) return "";
 
-      const ct = r.headers.get("content-type") || "image/jpeg";
-      const ab = await r.arrayBuffer();
-      const b64 = Buffer.from(ab).toString("base64");
-      // رجّع Data URI صالح للعرض في Power BI
-      return `data:${ct};base64,${b64}`;
+      // وحّد الـMIME إلى image/jpeg وخلّي السلسلة سطر واحد
+      const ab  = await r.arrayBuffer();
+      const b64 = Buffer.from(ab).toString("base64").replace(/\r?\n/g, "");
+      return `data:image/jpeg;base64,${b64}`;
     }
 
-    // 3) لمّا نكتب CSV، نحقن PhotoDataUri لكل صف
+    // CSV helpers
     const esc = (v) => {
       if (v === null || v === undefined) return "";
       const s = String(v);
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
+    const headers = ["EmailID", "PhotoDataUri"];
     const lines = [];
     lines.push(headers.map(esc).join(","));
 
-    // حدّ توازي بسيط عشان ما ينقطع بسبب Rate Limits
+    // حد توازي بسيط
     const CONCURRENCY = 5;
     let idx = 0;
 
     async function processRow(row) {
-      // ابني نسخة قابلة للكتابة
-      const out = { ...row };
-
-      // جهّز الـ Data URI
-      const photoUrl = row[photoField];
-      out.PhotoDataUri = await fetchPhotoDataUri(photoUrl);
-
-      // اكتب السطر
-      lines.push(headers.map(h => esc(out[h])).join(","));
+      const email = row[emailField] ?? "";        // خذ الإيميل من الحقل المحدد
+      const uri   = await fetchPhotoDataUri(row[photoField]);
+      lines.push([esc(email), esc(uri)].join(","));
     }
 
     async function runPool() {
       const tasks = [];
-      while (idx < rows.length && tasks.length < CONCURRENCY) {
-        tasks.push(processRow(rows[idx++]));
+      while (idx < flatRows.length && tasks.length < CONCURRENCY) {
+        tasks.push(processRow(flatRows[idx++]));
       }
       if (tasks.length === 0) return;
       await Promise.all(tasks);
