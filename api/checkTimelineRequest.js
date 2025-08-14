@@ -1,11 +1,11 @@
 // api/zohoCertsCsvPaged.js
-// POST body: { 
+// POST body: {
 //   url:"https://people.zoho.com/people/api/forms/.../getRecords",
 //   token:"...",
 //   limit:100,
 //   fileName:"export.csv",
-//   photoField:"Photo",       // اسم الحقل اللي فيه رابط viewEmployeePhoto (اختياري)
-//   emailField:"EmailID"      // اسم حقل الإيميل (اختياري، الافتراضي EmailID)
+//   photoField:"Photo",      // (اختياري) اسم حقل رابط الصورة
+//   emailField:"EmailID"     // (اختياري) اسم حقل الإيميل
 // }
 
 export default async function handler(req, res) {
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     const emailField = req.body?.emailField ?? "EmailID";
     if (!url || !token) return res.status(400).json({ error: "url and token are required" });
 
-    // retry 429
+    // ——— helpers ———
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     async function fetchPage(sIndex, attempt = 1) {
       const u = `${url}${url.includes("?") ? "&" : "?"}sIndex=${sIndex}&limit=${limit}`;
@@ -27,84 +27,102 @@ export default async function handler(req, res) {
       if (!r.ok) { const txt = await r.text().catch(()=>""); throw new Error(`Fetch failed ${r.status}: ${txt || r.statusText}`); }
       return r.json();
     }
-
-    // جمع كل الصفحات
-    let sIndex = Number(req.body?.start ?? 0);
-    const flatRows = [];
-    while (true) {
-      const data  = await fetchPage(sIndex);
-      const batch = data?.response?.result;
-      if (!Array.isArray(batch) || batch.length === 0) break;
-      for (const item of batch) {
-        if (!item || typeof item !== "object") continue;
-        const recordId = Object.keys(item)[0];
-        const arr      = item[recordId] ?? [];
-        const fields   = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
-        flatRows.push({ RecordId: recordId, ...fields });
-      }
-      if (batch.length < limit) break;
-      sIndex += limit;
-    }
-
-    // لو ما فيه بيانات: رجّع هيدر العمودين فقط
-    if (flatRows.length === 0) {
-      const emptyCsv = "EmailID,PhotoDataUri\r\n";
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
-      return res.status(200).send(emptyCsv);
-    }
-
-    // دالة تجيب الصورة وترجعها Data URI (image/jpeg فقط)
-    async function fetchPhotoDataUri(photoUrl) {
-      if (!photoUrl || typeof photoUrl !== "string") return "";
-      // استخرج filename
-      let filename = "";
-      try {
-        const u = new URL(photoUrl);
-        filename = u.searchParams.get("filename") || "";
-      } catch {
-        const i = photoUrl.indexOf("filename=");
-        if (i >= 0) filename = photoUrl.substring(i + "filename=".length);
-      }
-      if (!filename) return "";
-
-      const r = await fetch(
-        `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
-      if (!r.ok) return "";
-
-      // وحّد الـMIME إلى image/jpeg وخلّي السلسلة سطر واحد
-      const ab  = await r.arrayBuffer();
-      const b64 = Buffer.from(ab).toString("base64").replace(/\r?\n/g, "");
-      return `data:image/jpeg;base64,${b64}`;
-    }
-
-    // CSV helpers
     const esc = (v) => {
       if (v === null || v === undefined) return "";
       const s = String(v);
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
 
+    // ——— اجلب كل الصفحات وفلّط السجلات ———
+    let sIndex = Number(req.body?.start ?? 0);
+    const rows = [];
+    while (true) {
+      const data  = await fetchPage(sIndex);
+      const batch = data?.response?.result;
+      if (!Array.isArray(batch) || batch.length === 0) break;
+
+      for (const item of batch) {
+        if (!item || typeof item !== "object") continue;
+        const recordId = Object.keys(item)[0];
+        const arr      = item[recordId] ?? [];
+        const fields   = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
+        rows.push({ RecordId: recordId, ...fields });
+      }
+      if (batch.length < limit) break;
+      sIndex += limit;
+    }
+
+    // لو فاضي رجّع الهيدر فقط
+    if (rows.length === 0) {
+      const emptyCsv = "EmailID,PhotoDataUri\r\n";
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
+      return res.status(200).send(emptyCsv);
+    }
+
+    // ——— جلب الصورة وإرجاع Data URI (يدعم people + contacts) ———
+    async function fetchPhotoDataUri(photoUrl) {
+      if (!photoUrl || typeof photoUrl !== "string") return "";
+
+      let requestUrl = "";
+      try {
+        const u = new URL(photoUrl);
+
+        if (u.hostname.includes("people.zoho.com") && u.pathname.includes("/api/viewEmployeePhoto")) {
+          const filename = u.searchParams.get("filename") || "";
+          if (!filename) return "";
+          requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
+        } else if (u.hostname.includes("contacts.zoho.com") && u.pathname.includes("/file")) {
+          // استخدم رابط contacts كما هو (thumb أو الأصل)
+          requestUrl = u.toString();
+        } else {
+          // fallback: ابحث عن filename= في النص
+          const i = photoUrl.indexOf("filename=");
+          if (i >= 0) {
+            const filename = photoUrl.substring(i + "filename=".length);
+            requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
+          } else {
+            return "";
+          }
+        }
+      } catch {
+        const i = photoUrl.indexOf("filename=");
+        if (i >= 0) {
+          const filename = photoUrl.substring(i + "filename=".length);
+          requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
+        } else {
+          return "";
+        }
+      }
+
+      const r = await fetch(requestUrl, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      if (!r.ok) return "";
+
+      // وحّد الـMIME إلى image/jpeg، وشيل أي أسطر من Base64
+      const ab  = await r.arrayBuffer();
+      const b64 = Buffer.from(ab).toString("base64").replace(/\r?\n/g, "");
+      return `data:image/jpeg;base64,${b64}`;
+    }
+
+    // ——— ابني CSV بعمودين فقط ———
     const headers = ["EmailID", "PhotoDataUri"];
     const lines = [];
     lines.push(headers.map(esc).join(","));
 
-    // حد توازي بسيط
     const CONCURRENCY = 5;
     let idx = 0;
 
     async function processRow(row) {
-      const email = row[emailField] ?? "";        // خذ الإيميل من الحقل المحدد
-      const uri   = await fetchPhotoDataUri(row[photoField]);
+      const email = row[emailField] ?? "";
+      const photo = row[photoField] ?? "";
+      const uri   = await fetchPhotoDataUri(photo);
       lines.push([esc(email), esc(uri)].join(","));
     }
 
     async function runPool() {
       const tasks = [];
-      while (idx < flatRows.length && tasks.length < CONCURRENCY) {
-        tasks.push(processRow(flatRows[idx++]));
+      while (idx < rows.length && tasks.length < CONCURRENCY) {
+        tasks.push(processRow(rows[idx++]));
       }
       if (tasks.length === 0) return;
       await Promise.all(tasks);
