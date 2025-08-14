@@ -1,63 +1,141 @@
-async function fetchPhotoDataUri(photoUrl) {
-  if (!photoUrl || typeof photoUrl !== "string") return "";
+// api/zohoCertsCsvPaged.js
+// POST body: {
+//   url:"https://people.zoho.com/people/api/forms/.../getRecords",
+//   token:"...",
+//   limit:100,
+//   fileName:"export.csv",
+//   photoField:"Photo",      // (اختياري) اسم حقل رابط الصورة
+//   emailField:"EmailID"     // (اختياري) اسم حقل الإيميل
+// }
 
-  // حدّد الـendpoint ونختار التوكن المناسب حسب الدومين
-  let requestUrl = "";
-  let useToken = token; // الافتراضي: توكن Zoho People
-
+export default async function handler(req, res) {
   try {
-    const u = new URL(photoUrl);
+    const url        = req.body?.url;
+    const token      = req.body?.token;
+    const limit      = Number(req.body?.limit ?? 100);
+    const fileName   = req.body?.fileName ?? "export.csv";
+    const photoField = req.body?.photoField ?? "Photo";
+    const emailField = req.body?.emailField ?? "EmailID";
+    if (!url || !token) return res.status(400).json({ error: "url and token are required" });
 
-    if (u.hostname.includes("people.zoho.com") && u.pathname.includes("/api/viewEmployeePhoto")) {
-      const filename = u.searchParams.get("filename") || "";
-      if (!filename) return "";
-      requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
-      useToken = token; // People
-    } else if (u.hostname.includes("contacts.zoho.com") && u.pathname.includes("/file")) {
-      requestUrl = u.toString();             // Contacts رابط كما هو (thumb أو الأصل)
-      useToken = contactsToken || token;     // جرّب contactsToken، وإلا جرّب نفس token (يمكن يكون شامل)
-    } else {
-      // fallback: نص يحتوي filename=
-      const i = photoUrl.indexOf("filename=");
-      if (i >= 0) {
-        const filename = photoUrl.substring(i + "filename=".length);
-        requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
-        useToken = token;
-      } else {
-        return "";
+    // ——— helpers ———
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    async function fetchPage(sIndex, attempt = 1) {
+      const u = `${url}${url.includes("?") ? "&" : "?"}sIndex=${sIndex}&limit=${limit}`;
+      const r = await fetch(u, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      if (r.status === 429 && attempt <= 3) { await sleep(1000 * attempt); return fetchPage(sIndex, attempt + 1); }
+      if (!r.ok) { const txt = await r.text().catch(()=>""); throw new Error(`Fetch failed ${r.status}: ${txt || r.statusText}`); }
+      return r.json();
+    }
+    const esc = (v) => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    // ——— اجلب كل الصفحات وفلّط السجلات ———
+    let sIndex = Number(req.body?.start ?? 0);
+    const rows = [];
+    while (true) {
+      const data  = await fetchPage(sIndex);
+      const batch = data?.response?.result;
+      if (!Array.isArray(batch) || batch.length === 0) break;
+
+      for (const item of batch) {
+        if (!item || typeof item !== "object") continue;
+        const recordId = Object.keys(item)[0];
+        const arr      = item[recordId] ?? [];
+        const fields   = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
+        rows.push({ RecordId: recordId, ...fields });
       }
+      if (batch.length < limit) break;
+      sIndex += limit;
     }
-  } catch {
-    // مش URL كامل → جرّب استخراج filename=
-    const i = photoUrl.indexOf("filename=");
-    if (i >= 0) {
-      const filename = photoUrl.substring(i + "filename=".length);
-      requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
-      useToken = token;
-    } else {
-      return "";
+
+    // لو فاضي رجّع الهيدر فقط
+    if (rows.length === 0) {
+      const emptyCsv = "EmailID,PhotoDataUri\r\n";
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
+      return res.status(200).send(emptyCsv);
     }
+
+    // ——— جلب الصورة وإرجاع Data URI (يدعم people + contacts) ———
+    async function fetchPhotoDataUri(photoUrl) {
+      if (!photoUrl || typeof photoUrl !== "string") return "";
+
+      let requestUrl = "";
+      try {
+        const u = new URL(photoUrl);
+
+        if (u.hostname.includes("people.zoho.com") && u.pathname.includes("/api/viewEmployeePhoto")) {
+          const filename = u.searchParams.get("filename") || "";
+          if (!filename) return "";
+          requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
+        } else if (u.hostname.includes("contacts.zoho.com") && u.pathname.includes("/file")) {
+          // استخدم رابط contacts كما هو (thumb أو الأصل)
+          requestUrl = u.toString();
+        } else {
+          // fallback: ابحث عن filename= في النص
+          const i = photoUrl.indexOf("filename=");
+          if (i >= 0) {
+            const filename = photoUrl.substring(i + "filename=".length);
+            requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
+          } else {
+            return "";
+          }
+        }
+      } catch {
+        const i = photoUrl.indexOf("filename=");
+        if (i >= 0) {
+          const filename = photoUrl.substring(i + "filename=".length);
+          requestUrl = `https://people.zoho.com/api/viewEmployeePhoto?filename=${encodeURIComponent(filename)}`;
+        } else {
+          return "";
+        }
+      }
+
+      const r = await fetch(requestUrl, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      if (!r.ok) return "";
+
+      // وحّد الـMIME إلى image/jpeg، وشيل أي أسطر من Base64
+      const ab  = await r.arrayBuffer();
+      const b64 = Buffer.from(ab).toString("base64").replace(/\r?\n/g, "");
+      return `data:image/jpeg;base64,${b64}`;
+    }
+
+    // ——— ابني CSV بعمودين فقط ———
+    const headers = ["EmailID", "PhotoDataUri"];
+    const lines = [];
+    lines.push(headers.map(esc).join(","));
+
+    const CONCURRENCY = 5;
+    let idx = 0;
+
+    async function processRow(row) {
+      const email = row[emailField] ?? "";
+      const photo = row[photoField] ?? "";
+      const uri   = await fetchPhotoDataUri(photo);
+      lines.push([esc(email), esc(uri)].join(","));
+    }
+
+    async function runPool() {
+      const tasks = [];
+      while (idx < rows.length && tasks.length < CONCURRENCY) {
+        tasks.push(processRow(rows[idx++]));
+      }
+      if (tasks.length === 0) return;
+      await Promise.all(tasks);
+      return runPool();
+    }
+    await runPool();
+
+    const csv = lines.join("\r\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
+    return res.status(200).send(csv);
+
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "failed" });
   }
-
-  // ما عندنا توكن صالح لِـ Contacts
-  if (!useToken) return "";
-
-  // نفّذ الطلب
-  const r = await fetch(requestUrl, {
-    headers: { Authorization: `Zoho-oauthtoken ${useToken}` }
-  }).catch(() => null);
-
-  if (!r || !r.ok) return ""; // 401/403/شبكة… → تجاهل
-
-  // تأكد أن الرد صورة فعلاً (مو HTML لوج إن)
-  const ctHeader = r.headers.get("content-type") || "";
-  const mime = ctHeader.split(";")[0].trim().toLowerCase().replace("image/jpg", "image/jpeg");
-  if (!mime.startsWith("image/")) return "";
-
-  // Base64 سطر واحد
-  const ab  = await r.arrayBuffer();
-  if (!ab || ab.byteLength === 0) return "";
-  const b64 = Buffer.from(ab).toString("base64").replace(/\r?\n/g, "");
-
-  return `data:${mime};base64,${b64}`;
 }
