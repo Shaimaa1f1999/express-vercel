@@ -1,48 +1,75 @@
 export default function handler(req, res) {
-  try {
-    const email = req.body.email || {};
+    try {
+        const email = req.body.email;
 
-    // Body
-    const body = email.Body || "";
+        if (!email) {
+            return res.status(400).json({ error: "Email object missing" });
+        }
 
-    // Sender info
-    const senderName =
-      email.From?.EmailAddress?.Name?.trim() || "";
-    const senderEmail =
-      email.From?.EmailAddress?.Address?.trim() || "";
+        // النص الكامل (HTML أو Text)
+        const emailBody =
+            email?.body?.content ||
+            email?.uniqueBody?.content ||
+            email?.bodyPreview ||
+            email?.body ||
+            "";
 
-    // Date
-    const sentDate = email.ReceivedDateTime || "";
+        // الإيميل فقط لو موجود
+        const senderEmail =
+            email?.from?.emailAddress?.address ||
+            email?.sender?.emailAddress?.address ||
+            "";
 
-    // Extract AccountId
-    const accountIdMatch = body.match(/AccountId\s*[:\-]?\s*(\d+)/i);
-    const accountId = accountIdMatch ? accountIdMatch[1] : "";
+        // الاسم: لو عندنا إيميل من الأساس ما نحتاج اسم
+        const senderName = senderEmail
+            ? ""
+            : (
+                email?.from?.emailAddress?.name ||
+                email?.sender?.emailAddress?.name ||
+                ""
+              );
 
-    // Extract full Amount with decimals & commas
-    const amountRegex = /Amount\s*[:\-]?\s*([\d.,]+)/i;
-    const amountMatch = body.match(amountRegex);
+        const sentDate =
+            email?.receivedDateTime ||
+            email?.createdDateTime ||
+            "";
 
-    // Clean amount: remove commas فقط وخلّي النقاط
-    const amount = amountMatch
-      ? amountMatch[1].replace(/,/g, "")
-      : "";
+        // دالة استخراج قيم بدون قصّ أو تحويل
+        const extractValue = (label) => {
+            const patterns = [
+                `${label}\\s*[:\\-]?\\s*(.+)`,      // AccountId: 55521
+                `${label}\\s*=\\s*(.+)`,           // AccountId=55521
+                `${label}\\s+(.+)`                 // AccountId 55521
+            ];
 
-    return res.status(200).json({
-      status: "success",
-      data: {
-        senderName,
-        senderEmail,
-        sentDate,
-        accountId,
-        amount,
-        emailBody: body
-      }
-    });
+            for (const p of patterns) {
+                const regex = new RegExp(p, "i");
+                const match = emailBody.match(regex);
+                if (match) {
+                    // يرجّع القيمة كاملة بدون قص
+                    return match[1].trim();
+                }
+            }
 
-  } catch (err) {
-    return res.status(500).json({
-      status: "error",
-      message: err.message
-    });
-  }
+            return "";
+        };
+
+        const accountId = extractValue("AccountId");
+        const amount = extractValue("Amount");   // يرجّع كامل حتى لو فيه فاصلة طويلة
+
+        return res.status(200).json({
+            status: "success",
+            data: {
+                senderEmail,
+                senderName,
+                sentDate,
+                accountId,
+                amount,
+                emailBody
+            }
+        });
+
+    } catch (err) {
+        return res.status(500).json({ error: err.message });
+    }
 }
