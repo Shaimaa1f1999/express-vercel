@@ -6,7 +6,6 @@ export default function handler(req, res) {
             return res.status(400).json({ error: "Email object missing" });
         }
 
-        // النص الكامل (HTML أو Text)
         const emailBody =
             email?.body?.content ||
             email?.uniqueBody?.content ||
@@ -14,13 +13,12 @@ export default function handler(req, res) {
             email?.body ||
             "";
 
-        // الإيميل فقط لو موجود
         const senderEmail =
             email?.from?.emailAddress?.address ||
             email?.sender?.emailAddress?.address ||
+            email?.from ||
             "";
 
-        // الاسم: لو عندنا إيميل من الأساس ما نحتاج اسم
         const senderName = senderEmail
             ? ""
             : (
@@ -34,28 +32,21 @@ export default function handler(req, res) {
             email?.createdDateTime ||
             "";
 
-        // دالة استخراج قيم بدون قصّ أو تحويل
-        const extractValue = (label) => {
-            const patterns = [
-                `${label}\\s*[:\\-]?\\s*(.+)`,      // AccountId: 55521
-                `${label}\\s*=\\s*(.+)`,           // AccountId=55521
-                `${label}\\s+(.+)`                 // AccountId 55521
-            ];
+        // نجيب كل الـ AccountId
+        const accountRegex = /AccountId\s*[:=\-]?\s*(.+)/gi;
+        const amountRegex  = /Amount\s*[:=\-]?\s*(.+)/gi;
 
-            for (const p of patterns) {
-                const regex = new RegExp(p, "i");
-                const match = emailBody.match(regex);
-                if (match) {
-                    // يرجّع القيمة كاملة بدون قص
-                    return match[1].trim();
-                }
-            }
+        const accountMatches = [...emailBody.matchAll(accountRegex)];
+        const amountMatches  = [...emailBody.matchAll(amountRegex)];
 
-            return "";
-        };
+        const records = [];
 
-        const accountId = extractValue("AccountId");
-        const amount = extractValue("Amount");   // يرجّع كامل حتى لو فيه فاصلة طويلة
+        for (let i = 0; i < accountMatches.length; i++) {
+            records.push({
+                accountId: accountMatches[i][1].trim(),
+                amount: amountMatches[i] ? amountMatches[i][1].trim() : ""
+            });
+        }
 
         return res.status(200).json({
             status: "success",
@@ -63,8 +54,7 @@ export default function handler(req, res) {
                 senderEmail,
                 senderName,
                 sentDate,
-                accountId,
-                amount,
+                records,      // ← هنا كل النتائج
                 emailBody
             }
         });
