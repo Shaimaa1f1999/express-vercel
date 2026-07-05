@@ -1,111 +1,177 @@
-// api/zohoCertsCsvPaged.j
-// POST body: { url: "https://people.zoho.com/people/api/forms/.../getRecords", token: "...", limit: 100 }
-
 export default async function handler(req, res) {
   try {
-    const url   = req.body?.url;                      // base url بدون sIndex/limit
-    const token = req.body?.token;                    // OAuth access_token
-    const limit = Number(req.body?.limit ?? 100);     // 100 أو 200 حسب رغبتك
-    if (!url || !token) {
-      return res.status(400).json({ error: "url and token are required" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed. Use POST." });
     }
 
-    // بسيط: إعادة المحاولة لو ضغط/429
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-    async function fetchPage(sIndex, attempt = 1) {
-      const u = `${url}${url.includes("?") ? "&" : "?"}sIndex=${sIndex}&limit=${limit}`;
-      const r = await fetch(u, {
-        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    const ekaRows = req.body?.eka_rows;
+    const comscoRows = req.body?.comsco_rows;
+
+    if (!Array.isArray(ekaRows) || !Array.isArray(comscoRows)) {
+      return res.status(400).json({
+        error: "eka_rows and comsco_rows are required and must be arrays."
       });
-      if (r.status === 429 && attempt <= 3) {
-        await sleep(1000 * attempt);
-        return fetchPage(sIndex, attempt + 1);
-      }
-      if (!r.ok) {
-        const txt = await r.text().catch(()=>"");
-        throw new Error(`Fetch failed ${r.status}: ${txt || r.statusText}`);
-      }
-      return r.json();
     }
 
-    // اجمع كل الصفحات
-    let sIndex = 1;
-    const all = [];
-    while (true) {
-      const data = await fetchPage(sIndex);
-      const batch = data?.response?.result;
-      if (!Array.isArray(batch) || batch.length === 0) break;
-      all.push(...batch);
-      if (batch.length < limit) break;      // أقل من الحد؟ وقف
-      sIndex += limit;                      // انتقل للصفحة التالية
-    }
+    const compareFields = ["Quantity", "Price", "Currency", "Exposure"];
 
-    if (all.length === 0) {
-      return res.status(200).send("RecordId\n"); // CSV فاضي مع هيدر واحد
-    }
-
-    // فلترة التعشيق وتحضير الصفوف
-    const rows = [];
-    const headerSet = new Set(["RecordId"]);
-    for (const item of all) {
-      if (!item || typeof item !== "object") continue;
-      const recordId = Object.keys(item)[0];
-      const arr = item[recordId] ?? [];
-      const fields = Array.isArray(arr) ? (arr[0] ?? {}) : (arr || {});
-      const row = { RecordId: recordId, ...fields };
-      Object.keys(row).forEach(k => headerSet.add(k));
-      rows.push(row);
-    }
-
-    // ترتيب أعمدة مفيد أولاً ثم الباقي أبجديًا
-    const preferred = [
-    "RecordId","Reference_Number","AddedBy","AddedTime",
-      "ModifiedBy","ModifiedTime","Employee1",
-      "Compleation_Date","Training_Name","Description","Type",
-      "Proof_of_Execution_Document","Proof_of_Execution",
-      "Training_Request","Employee1.ID","ApprovalStatus","ApprovalTime","Email_ID"
-    ];
-    const allHeaders = Array.from(headerSet);
-    const rest = allHeaders.filter(h => !preferred.includes(h)).sort((a,b)=>a.localeCompare(b));
-    const headers = [...preferred.filter(h => headerSet.has(h)), ...rest];
-
-    const renameMap = {
-  "RecordId": "ZOHO_LINK_ID",
-  "Reference_Number": "Reference Number",
-  "AddedBy": "Added By",
-  "AddedTime": "Added Time",
-  "ModifiedBy": "Modified By",
-  "ModifiedTime": "Modified Time",
-  "Employee1": "Employee",
-  "Compleation_Date": "Completion Date",
-  "Training_Name": "Training Name",
-  "Proof_of_Execution_Document": "Proof of Execution Document",
-  "Proof_of_Execution": "Proof of Execution",
-  "Training_Request":  "Training Request",
-  "ApprovalStatus": "Approval Status",
- 
-  "ApprovalTime": "Approval Time",
-  
-  // add as many as you want...
-};
-
-    // CSV
-    const esc = (v) => {
+    const normalizeText = (v) => {
       if (v === null || v === undefined) return "";
-      const s = String(v);
-      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      return String(v).trim();
     };
-    const lines = [];
-    //lines.push(headers.map(esc).join(","));
-    lines.push(headers.map(h => esc(renameMap[h] || h)).join(","));
 
-    for (const r of rows) lines.push(headers.map(h => esc(r[h])).join(","));
-    const csv = lines.join("\r\n");
+    const normalizeNumber = (v) => {
+      if (v === null || v === undefined || v === "") return null;
+      const n = Number(String(v).replace(/,/g, "").trim());
+      return Number.isFinite(n) ? n : String(v).trim();
+    };
 
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", "attachment; filename=certs.csv");
-    return res.status(200).send(csv);
+    const normalizeForCompare = (field, value) => {
+      if (["Quantity", "Price", "Exposure"].includes(field)) {
+        return normalizeNumber(value);
+      }
+      return normalizeText(value).toUpperCase();
+    };
+
+    const toMap = (rows) => {
+      const map = new Map();
+      const duplicates = [];
+
+      for (const row of rows) {
+        const tradeId = normalizeText(row.TradeID);
+        if (!tradeId) continue;
+
+        if (map.has(tradeId)) {
+          duplicates.push({ TradeID: tradeId, row });
+        } else {
+          map.set(tradeId, row);
+        }
+      }
+
+      return { map, duplicates };
+    };
+
+    const eka = toMap(ekaRows);
+    const comsco = toMap(comscoRows);
+
+    const missingInCOMSCO = [];
+    const missingInEKA = [];
+    const fieldMismatches = [];
+
+    for (const [tradeId, ekaRow] of eka.map.entries()) {
+      const comscoRow = comsco.map.get(tradeId);
+
+      if (!comscoRow) {
+        missingInCOMSCO.push({
+          TradeID: tradeId,
+          EKA: ekaRow
+        });
+        continue;
+      }
+
+      for (const field of compareFields) {
+        const ekaValue = normalizeForCompare(field, ekaRow[field]);
+        const comscoValue = normalizeForCompare(field, comscoRow[field]);
+
+        if (ekaValue !== comscoValue) {
+          fieldMismatches.push({
+            TradeID: tradeId,
+            Field: field,
+            EKA_Value: ekaRow[field],
+            COMSCO_Value: comscoRow[field]
+          });
+        }
+      }
+    }
+
+    for (const [tradeId, comscoRow] of comsco.map.entries()) {
+      if (!eka.map.has(tradeId)) {
+        missingInEKA.push({
+          TradeID: tradeId,
+          COMSCO: comscoRow
+        });
+      }
+    }
+
+    const result = {
+      summary: {
+        eka_count: eka.map.size,
+        comsco_count: comsco.map.size,
+        missing_in_comsco_count: missingInCOMSCO.length,
+        missing_in_eka_count: missingInEKA.length,
+        mismatch_count: fieldMismatches.length,
+        duplicate_eka_count: eka.duplicates.length,
+        duplicate_comsco_count: comsco.duplicates.length
+      },
+      missing_in_comsco: missingInCOMSCO,
+      missing_in_eka: missingInEKA,
+      field_mismatches: fieldMismatches,
+      duplicates: {
+        eka: eka.duplicates,
+        comsco: comsco.duplicates
+      },
+      report_text: buildReport({
+        missingInCOMSCO,
+        missingInEKA,
+        fieldMismatches,
+        eka,
+        comsco
+      })
+    };
+
+    return res.status(200).json(result);
   } catch (e) {
-    return res.status(500).json({ error: e?.message || "failed" });
+    return res.status(500).json({
+      error: e?.message || "failed"
+    });
   }
+}
+
+function buildReport({ missingInCOMSCO, missingInEKA, fieldMismatches, eka, comsco }) {
+  const lines = [];
+
+  lines.push("Reconciliation Report");
+  lines.push("");
+  lines.push("Summary");
+  lines.push(`- EKA trades: ${eka.map.size}`);
+  lines.push(`- COMSCO trades: ${comsco.map.size}`);
+  lines.push(`- Missing in COMSCO: ${missingInCOMSCO.length}`);
+  lines.push(`- Missing in EKA: ${missingInEKA.length}`);
+  lines.push(`- Field mismatches: ${fieldMismatches.length}`);
+  lines.push(`- Duplicate EKA TradeIDs: ${eka.duplicates.length}`);
+  lines.push(`- Duplicate COMSCO TradeIDs: ${comsco.duplicates.length}`);
+  lines.push("");
+
+  if (missingInCOMSCO.length) {
+    lines.push("Missing in COMSCO");
+    for (const x of missingInCOMSCO) {
+      lines.push(`- ${x.TradeID}`);
+    }
+    lines.push("");
+  }
+
+  if (missingInEKA.length) {
+    lines.push("Missing in EKA");
+    for (const x of missingInEKA) {
+      lines.push(`- ${x.TradeID}`);
+    }
+    lines.push("");
+  }
+
+  if (fieldMismatches.length) {
+    lines.push("Field Mismatches");
+    lines.push("| TradeID | Field | EKA Value | COMSCO Value |");
+    lines.push("|---|---|---|---|");
+    for (const x of fieldMismatches) {
+      lines.push(`| ${x.TradeID} | ${x.Field} | ${x.EKA_Value ?? ""} | ${x.COMSCO_Value ?? ""} |`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Recommended Action");
+  lines.push("- Review missing trades first.");
+  lines.push("- Validate mismatched commercial fields with the source system owners.");
+  lines.push("- Re-run reconciliation after corrections.");
+
+  return lines.join("\n");
 }
