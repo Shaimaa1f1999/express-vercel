@@ -1,8 +1,10 @@
 /**
  * CRC Exposure Calculation API
- * Route: POST /api/calculate-exposure
  *
- * Expected body:
+ * Route:
+ * POST /api/calculate-exposure
+ *
+ * Expected request body:
  * {
  *   "commodity": "RawSugar",
  *   "siteOrOrigin": "Jeddah",
@@ -43,6 +45,10 @@ module.exports = async function handler(req, res) {
       selectedSiteOrOrigin
     );
 
+    /*
+     * Keep only NetExposure limits.
+     * Rows without LimitType are retained for compatibility.
+     */
     const netExposureLimits = riskLimits.filter((row) => {
       const limitType = extractTextValue(
         getField(row, [
@@ -56,12 +62,22 @@ module.exports = async function handler(req, res) {
       return !limitType || sameText(limitType, "NetExposure");
     });
 
+    /*
+     * Build available Commodity + Site combinations dynamically.
+     */
     const exposureKeys = buildExposureKeys({
       physicalPositions,
       hedgePositions,
       riskLimits: netExposureLimits,
     });
 
+    /*
+     * Apply user filters:
+     * - Both empty: all
+     * - Commodity only
+     * - Site only
+     * - Commodity and site
+     */
     const selectedKeys = exposureKeys.filter((key) =>
       keyMatchesSelection({
         key,
@@ -72,6 +88,10 @@ module.exports = async function handler(req, res) {
     );
 
     const snapshotRows = selectedKeys.map((key) => {
+      /*
+       * Physical:
+       * Commodity + SiteOrOrigin
+       */
       const matchingPhysicalRows = physicalPositions.filter((row) => {
         return (
           sameText(getCommodity(row), key.commodity) &&
@@ -79,6 +99,10 @@ module.exports = async function handler(req, res) {
         );
       });
 
+      /*
+       * Hedges:
+       * Commodity + LinkedSite
+       */
       const matchingHedgeRows = hedgePositions.filter((row) => {
         return (
           sameText(getCommodity(row), key.commodity) &&
@@ -86,6 +110,10 @@ module.exports = async function handler(req, res) {
         );
       });
 
+      /*
+       * Limits:
+       * Commodity + SiteOrOrigin
+       */
       const matchingLimitRows = netExposureLimits.filter((row) => {
         return (
           sameText(getCommodity(row), key.commodity) &&
@@ -123,6 +151,9 @@ module.exports = async function handler(req, res) {
         2
       );
 
+      /*
+       * Hedge values are already negative.
+       */
       const netMT = round(physicalMT + hedgeMT, 2);
       const absNetMT = Math.abs(netMT);
 
@@ -176,15 +207,19 @@ module.exports = async function handler(req, res) {
       return {
         commodity: key.commodity,
         siteOrOrigin: key.siteOrOrigin,
+
         physicalMT,
         hedgeMT,
         netMT,
         absNetMT,
+
         netMTM: round(physicalMTM + hedgeMTM, 2),
+
         limitType: "NetExposure",
         limitAmount,
         utilizationPct,
         status,
+
         sourceCounts: {
           physicalRows: matchingPhysicalRows.length,
           hedgeRows: matchingHedgeRows.length,
@@ -197,10 +232,22 @@ module.exports = async function handler(req, res) {
 
     const summary = {
       totalRows: sortedRows.length,
-      okCount: sortedRows.filter((row) => row.status === "OK").length,
-      watchCount: sortedRows.filter((row) => row.status === "Watch").length,
-      breachCount: sortedRows.filter((row) => row.status === "Breach").length,
-      noLimitCount: sortedRows.filter((row) => row.status === "NO_LIMIT").length,
+
+      okCount: sortedRows.filter(
+        (row) => row.status === "OK"
+      ).length,
+
+      watchCount: sortedRows.filter(
+        (row) => row.status === "Watch"
+      ).length,
+
+      breachCount: sortedRows.filter(
+        (row) => row.status === "Breach"
+      ).length,
+
+      noLimitCount: sortedRows.filter(
+        (row) => row.status === "NO_LIMIT"
+      ).length,
     };
 
     const agentMessage = buildAgentMessage({
@@ -230,6 +277,10 @@ module.exports = async function handler(req, res) {
       snapshotRows: sortedRows,
       agentMessage,
 
+      /*
+       * Temporary debug output.
+       * Remove after everything works correctly.
+       */
       debug: {
         physicalFields: Object.keys(physicalPositions[0] || {}),
         hedgeFields: Object.keys(hedgePositions[0] || {}),
@@ -238,36 +289,46 @@ module.exports = async function handler(req, res) {
         physicalValues: physicalPositions.slice(0, 10).map((row) => ({
           commodity: getCommodity(row),
           siteOrOrigin: getPhysicalSite(row),
-          volumeMT: getField(row, [
-            "VolumeMT",
-            "Volume MT",
-            "Volume_x0020_MT",
-          ]),
+          volumeMT: toNumber(
+            getField(row, [
+              "VolumeMT",
+              "Volume MT",
+              "Volume_x0020_MT",
+            ])
+          ),
         })),
 
         hedgeValues: hedgePositions.slice(0, 10).map((row) => ({
           commodity: getCommodity(row),
           linkedSite: getHedgeSite(row),
-          volumeMT: getField(row, [
-            "VolumeMT",
-            "Volume MT",
-            "Volume_x0020_MT",
-          ]),
+          volumeMT: toNumber(
+            getField(row, [
+              "VolumeMT",
+              "Volume MT",
+              "Volume_x0020_MT",
+            ])
+          ),
         })),
 
         limitValues: riskLimits.slice(0, 10).map((row) => ({
           commodity: getCommodity(row),
           siteOrOrigin: getLimitSite(row),
-          limitType: getField(row, [
-            "LimitType",
-            "Limit Type",
-            "Limit_x0020_Type",
-          ]),
-          limitAmount: getField(row, [
-            "LimitAmount",
-            "Limit Amount",
-            "Limit_x0020_Amount",
-          ]),
+
+          limitType: extractTextValue(
+            getField(row, [
+              "LimitType",
+              "Limit Type",
+              "Limit_x0020_Type",
+            ])
+          ),
+
+          limitAmount: toNumber(
+            getField(row, [
+              "LimitAmount",
+              "Limit Amount",
+              "Limit_x0020_Amount",
+            ])
+          ),
         })),
       },
     });
@@ -302,6 +363,9 @@ function normalizeRows(input) {
       return {};
     }
 
+    /*
+     * Supports payloads with nested SharePoint fields.
+     */
     if (
       row.fields &&
       typeof row.fields === "object" &&
@@ -325,30 +389,100 @@ function cleanText(value) {
   return String(value).trim();
 }
 
+/**
+ * Extract text from:
+ *
+ * 1. Normal strings:
+ *    RawSugar
+ *
+ * 2. SharePoint lookup objects:
+ *    { "Id": 0, "Value": "RawSugar" }
+ *
+ * 3. SharePoint lookup arrays:
+ *    [{ "Id": 0, "Value": "RawSugar" }]
+ *
+ * 4. JSON arrays serialized as strings:
+ *    "[{\"Id\":0,\"Value\":\"RawSugar\"}]"
+ */
 function extractTextValue(value) {
   if (value === null || value === undefined) {
     return "";
   }
 
-  if (typeof value === "string" || typeof value === "number") {
-    return cleanText(value);
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value).trim();
+  }
+
+  if (typeof value === "string") {
+    const text = value.trim();
+
+    if (!text) {
+      return "";
+    }
+
+    try {
+      const parsed = JSON.parse(text);
+      const parsedValue = extractTextValue(parsed);
+
+      if (parsedValue) {
+        return parsedValue;
+      }
+    } catch {
+      /*
+       * Normal text, not JSON.
+       */
+    }
+
+    return text;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "";
+    }
+
+    /*
+     * Usually one SharePoint lookup value.
+     */
+    return extractTextValue(value[0]);
   }
 
   if (typeof value === "object") {
-    return cleanText(
+    const preferredValue =
       value.Value ??
-        value.value ??
-        value.Title ??
-        value.title ??
-        value.Label ??
-        value.label ??
-        value.Name ??
-        value.name ??
-        ""
+      value.value ??
+      value.Title ??
+      value.title ??
+      value.Label ??
+      value.label ??
+      value.Name ??
+      value.name ??
+      value.DisplayName ??
+      value.displayName;
+
+    if (preferredValue !== undefined && preferredValue !== null) {
+      return extractTextValue(preferredValue);
+    }
+
+    /*
+     * Fallback for objects with a single usable property.
+     */
+    const usableEntries = Object.entries(value).filter(
+      ([key, entryValue]) =>
+        !key.startsWith("@odata") &&
+        !key.endsWith("@odata.type") &&
+        entryValue !== null &&
+        entryValue !== undefined
     );
+
+    if (usableEntries.length === 1) {
+      return extractTextValue(usableEntries[0][1]);
+    }
+
+    return "";
   }
 
-  return cleanText(value);
+  return String(value).trim();
 }
 
 function normalizeText(value) {
@@ -370,6 +504,9 @@ function getField(row, possibleNames) {
     return undefined;
   }
 
+  /*
+   * Exact field-name match.
+   */
   for (const name of possibleNames) {
     if (
       Object.prototype.hasOwnProperty.call(row, name) &&
@@ -380,6 +517,9 @@ function getField(row, possibleNames) {
     }
   }
 
+  /*
+   * Case-, spacing-, and SharePoint-code-insensitive match.
+   */
   const rowKeys = Object.keys(row);
 
   for (const expectedName of possibleNames) {
@@ -412,6 +552,8 @@ function getCommodity(row) {
       "CommodityName",
       "Commodity Name",
       "Commodity_x0020_Name",
+      "field_1",
+      "field_2",
     ])
   );
 }
@@ -427,6 +569,7 @@ function getPhysicalSite(row) {
       "Origin_x0020_Or_x0020_Site",
       "Site",
       "Location",
+      "field_3",
     ])
   );
 }
@@ -446,6 +589,7 @@ function getHedgeSite(row) {
       "Origin Or Site",
       "Site",
       "Location",
+      "field_7",
     ])
   );
 }
@@ -462,6 +606,7 @@ function getLimitSite(row) {
       "Origin Or Site",
       "Site",
       "Location",
+      "field_2",
     ])
   );
 }
@@ -503,12 +648,18 @@ function keyMatchesSelection({
       return sameText(key.commodity, selectedCommodity);
 
     case "SITE_ONLY":
-      return sameText(key.siteOrOrigin, selectedSiteOrOrigin);
+      return sameText(
+        key.siteOrOrigin,
+        selectedSiteOrOrigin
+      );
 
     case "COMMODITY_AND_SITE":
       return (
         sameText(key.commodity, selectedCommodity) &&
-        sameText(key.siteOrOrigin, selectedSiteOrOrigin)
+        sameText(
+          key.siteOrOrigin,
+          selectedSiteOrOrigin
+        )
       );
 
     default:
@@ -548,15 +699,24 @@ function buildExposureKeys({
   }
 
   physicalPositions.forEach((row) => {
-    addKey(getCommodity(row), getPhysicalSite(row));
+    addKey(
+      getCommodity(row),
+      getPhysicalSite(row)
+    );
   });
 
   hedgePositions.forEach((row) => {
-    addKey(getCommodity(row), getHedgeSite(row));
+    addKey(
+      getCommodity(row),
+      getHedgeSite(row)
+    );
   });
 
   riskLimits.forEach((row) => {
-    addKey(getCommodity(row), getLimitSite(row));
+    addKey(
+      getCommodity(row),
+      getLimitSite(row)
+    );
   });
 
   return Array.from(keyMap.values());
@@ -571,7 +731,11 @@ function toNumber(value) {
     return Number.isFinite(value) ? value : 0;
   }
 
-  if (value === null || value === undefined || value === "") {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
     return 0;
   }
 
@@ -587,7 +751,8 @@ function toNumber(value) {
 
 function sumRows(rows, possibleFields) {
   return rows.reduce((total, row) => {
-    return total + toNumber(getField(row, possibleFields));
+    const value = getField(row, possibleFields);
+    return total + toNumber(value);
   }, 0);
 }
 
@@ -595,7 +760,9 @@ function round(value, decimalPlaces = 2) {
   const factor = 10 ** decimalPlaces;
 
   return (
-    Math.round((toNumber(value) + Number.EPSILON) * factor) / factor
+    Math.round(
+      (toNumber(value) + Number.EPSILON) * factor
+    ) / factor
   );
 }
 
@@ -634,15 +801,18 @@ function sortRows(rows) {
       return statusDifference;
     }
 
-    const commodityDifference = cleanText(left.commodity).localeCompare(
-      cleanText(right.commodity)
-    );
+    const commodityDifference =
+      cleanText(left.commodity).localeCompare(
+        cleanText(right.commodity)
+      );
 
     if (commodityDifference !== 0) {
       return commodityDifference;
     }
 
-    return cleanText(left.siteOrOrigin).localeCompare(
+    return cleanText(
+      left.siteOrOrigin
+    ).localeCompare(
       cleanText(right.siteOrOrigin)
     );
   });
@@ -658,11 +828,15 @@ function buildAgentMessage({
   const selection = [];
 
   if (selectedCommodity) {
-    selection.push(`Commodity: ${selectedCommodity}`);
+    selection.push(
+      `Commodity: ${selectedCommodity}`
+    );
   }
 
   if (selectedSiteOrOrigin) {
-    selection.push(`Site/Origin: ${selectedSiteOrOrigin}`);
+    selection.push(
+      `Site/Origin: ${selectedSiteOrOrigin}`
+    );
   }
 
   const selectionText =
