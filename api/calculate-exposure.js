@@ -4,10 +4,11 @@
  * Route:
  * POST /api/calculate-exposure
  *
- * Expected request body:
+ * Request body:
  * {
- *   "commodity": "RawSugar",
- *   "siteOrOrigin": "Jeddah",
+ *   "commodity": "RawSugar" | "WhiteSugar" | "PalmOil" | "ALL",
+ *   "siteOrOrigin": "Jeddah" | "Egypt" | "Indonesia" | "Malaysia" | "ALL",
+ *   "asOfDate": "2026-07-22" | "ALL" | "",
  *   "physicalPositions": [],
  *   "hedgePositions": [],
  *   "riskLimits": []
@@ -33,16 +34,14 @@ module.exports = async function handler(req, res) {
   try {
     const body = req.body || {};
 
+    /*
+     * Normalize filters.
+     * ALL means no Commodity/Site filter.
+     */
     const rawCommodity = extractTextValue(body.commodity);
     const rawSiteOrOrigin = extractTextValue(body.siteOrOrigin);
+    const rawAsOfDate = extractTextValue(body.asOfDate);
 
-    /*
-     * Copilot Studio sends the literal value "ALL" when the user
-     * does not specify a Commodity and/or SiteOrOrigin.
-     *
-     * The existing filter logic treats empty strings as "no filter",
-     * so normalize ALL to an empty string before deriving filter status.
-     */
     const selectedCommodity =
       !rawCommodity || sameText(rawCommodity, "ALL")
         ? ""
@@ -53,18 +52,67 @@ module.exports = async function handler(req, res) {
         ? ""
         : rawSiteOrOrigin;
 
+    /*
+     * ALL or empty date means:
+     * Use the latest date found in the source data.
+     */
+    const requestedDate =
+      !rawAsOfDate || sameText(rawAsOfDate, "ALL")
+        ? ""
+        : normalizeDate(rawAsOfDate);
+
     const physicalPositions = normalizeRows(body.physicalPositions);
     const hedgePositions = normalizeRows(body.hedgePositions);
     const riskLimits = normalizeRows(body.riskLimits);
 
-    const filterStatus = deriveFilterStatus(
-      selectedCommodity,
-      selectedSiteOrOrigin
+    /*
+     * Discover dates dynamically.
+     * No fixed or hardcoded dates.
+     */
+    const availableDates = collectAvailableDates(
+      physicalPositions,
+      hedgePositions
+    );
+
+    if (availableDates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "No valid AsOfDate values were found in Physical Positions or Hedge Positions.",
+      });
+    }
+
+    const latestAvailableDate = availableDates[0];
+
+    const exactDateMatch =
+      Boolean(requestedDate) &&
+      availableDates.includes(requestedDate);
+
+    const usedLatestBecauseNoDate = !requestedDate;
+
+    const fallbackUsed =
+      Boolean(requestedDate) &&
+      !exactDateMatch;
+
+    const resolvedDate = exactDateMatch
+      ? requestedDate
+      : latestAvailableDate;
+
+    /*
+     * Filter source rows by the resolved date before calculating.
+     * This prevents combining multiple trading dates.
+     */
+    const datedPhysicalPositions = physicalPositions.filter(
+      (row) => getRowDate(row) === resolvedDate
+    );
+
+    const datedHedgePositions = hedgePositions.filter(
+      (row) => getRowDate(row) === resolvedDate
     );
 
     /*
-     * Keep only NetExposure limits.
-     * Rows without LimitType are retained for compatibility.
+     * Risk limits normally remain effective across dates.
+     * Only NetExposure limits are used.
      */
     const netExposureLimits = riskLimits.filter((row) => {
       const limitType = extractTextValue(
@@ -79,21 +127,22 @@ module.exports = async function handler(req, res) {
       return !limitType || sameText(limitType, "NetExposure");
     });
 
+    const filterStatus = deriveFilterStatus(
+      selectedCommodity,
+      selectedSiteOrOrigin
+    );
+
     /*
-     * Build available Commodity + Site combinations dynamically.
+     * Build all Commodity + Site keys available for the resolved date.
      */
     const exposureKeys = buildExposureKeys({
-      physicalPositions,
-      hedgePositions,
+      physicalPositions: datedPhysicalPositions,
+      hedgePositions: datedHedgePositions,
       riskLimits: netExposureLimits,
     });
 
     /*
-     * Apply user filters:
-     * - Both empty: all
-     * - Commodity only
-     * - Site only
-     * - Commodity and site
+     * Apply Commodity and Site filters.
      */
     const selectedKeys = exposureKeys.filter((key) =>
       keyMatchesSelection({
@@ -106,37 +155,49 @@ module.exports = async function handler(req, res) {
 
     const snapshotRows = selectedKeys.map((key) => {
       /*
-       * Physical:
-       * Commodity + SiteOrOrigin
+       * Physical rows:
+       * Commodity + SiteOrOrigin + resolved date
        */
-      const matchingPhysicalRows = physicalPositions.filter((row) => {
-        return (
-          sameText(getCommodity(row), key.commodity) &&
-          sameText(getPhysicalSite(row), key.siteOrOrigin)
-        );
-      });
+      const matchingPhysicalRows =
+        datedPhysicalPositions.filter((row) => {
+          return (
+            sameText(getCommodity(row), key.commodity) &&
+            sameText(
+              getPhysicalSite(row),
+              key.siteOrOrigin
+            )
+          );
+        });
 
       /*
-       * Hedges:
-       * Commodity + LinkedSite
+       * Hedge rows:
+       * Commodity + LinkedSite + resolved date
        */
-      const matchingHedgeRows = hedgePositions.filter((row) => {
-        return (
-          sameText(getCommodity(row), key.commodity) &&
-          sameText(getHedgeSite(row), key.siteOrOrigin)
-        );
-      });
+      const matchingHedgeRows =
+        datedHedgePositions.filter((row) => {
+          return (
+            sameText(getCommodity(row), key.commodity) &&
+            sameText(
+              getHedgeSite(row),
+              key.siteOrOrigin
+            )
+          );
+        });
 
       /*
-       * Limits:
+       * Risk limit:
        * Commodity + SiteOrOrigin
        */
-      const matchingLimitRows = netExposureLimits.filter((row) => {
-        return (
-          sameText(getCommodity(row), key.commodity) &&
-          sameText(getLimitSite(row), key.siteOrOrigin)
-        );
-      });
+      const matchingLimitRows =
+        netExposureLimits.filter((row) => {
+          return (
+            sameText(getCommodity(row), key.commodity) &&
+            sameText(
+              getLimitSite(row),
+              key.siteOrOrigin
+            )
+          );
+        });
 
       const physicalMT = round(
         sumRows(matchingPhysicalRows, [
@@ -169,12 +230,44 @@ module.exports = async function handler(req, res) {
       );
 
       /*
-       * Hedge values are already negative.
+       * Hedges are already stored as negative values.
        */
-      const netMT = round(physicalMT + hedgeMT, 2);
+      const netMT = round(
+        physicalMT + hedgeMT,
+        2
+      );
+
       const absNetMT = Math.abs(netMT);
 
-      const limitRow = matchingLimitRows[0] || null;
+      const physicalMTM = sumRows(
+        matchingPhysicalRows,
+        [
+          "MTMValue",
+          "MTM Value",
+          "MTM_x0020_Value",
+          "NetMTM",
+          "Net MTM",
+        ]
+      );
+
+      const hedgeMTM = sumRows(
+        matchingHedgeRows,
+        [
+          "MTMValue",
+          "MTM Value",
+          "MTM_x0020_Value",
+          "NetMTM",
+          "Net MTM",
+        ]
+      );
+
+      const netMTM = round(
+        physicalMTM + hedgeMTM,
+        2
+      );
+
+      const limitRow =
+        matchingLimitRows[0] || null;
 
       const limitAmount = limitRow
         ? round(
@@ -197,7 +290,12 @@ module.exports = async function handler(req, res) {
 
       const utilizationPct =
         limitAmount > 0
-          ? round((absNetMT / Math.abs(limitAmount)) * 100, 1)
+          ? round(
+              (absNetMT /
+                Math.abs(limitAmount)) *
+                100,
+              1
+            )
           : null;
 
       const status =
@@ -205,23 +303,9 @@ module.exports = async function handler(req, res) {
           ? "NO_LIMIT"
           : calculateStatus(utilizationPct);
 
-      const physicalMTM = sumRows(matchingPhysicalRows, [
-        "MTMValue",
-        "MTM Value",
-        "MTM_x0020_Value",
-        "NetMTM",
-        "Net MTM",
-      ]);
-
-      const hedgeMTM = sumRows(matchingHedgeRows, [
-        "MTMValue",
-        "MTM Value",
-        "MTM_x0020_Value",
-        "NetMTM",
-        "Net MTM",
-      ]);
-
       return {
+        asOfDate: resolvedDate,
+
         commodity: key.commodity,
         siteOrOrigin: key.siteOrOrigin,
 
@@ -229,8 +313,7 @@ module.exports = async function handler(req, res) {
         hedgeMT,
         netMT,
         absNetMT,
-
-        netMTM: round(physicalMTM + hedgeMTM, 2),
+        netMTM,
 
         limitType: "NetExposure",
         limitAmount,
@@ -238,9 +321,12 @@ module.exports = async function handler(req, res) {
         status,
 
         sourceCounts: {
-          physicalRows: matchingPhysicalRows.length,
-          hedgeRows: matchingHedgeRows.length,
-          limitRows: matchingLimitRows.length,
+          physicalRows:
+            matchingPhysicalRows.length,
+          hedgeRows:
+            matchingHedgeRows.length,
+          limitRows:
+            matchingLimitRows.length,
         },
       };
     });
@@ -267,10 +353,24 @@ module.exports = async function handler(req, res) {
       ).length,
     };
 
+    const dateResolution = {
+      requestedDate: requestedDate || null,
+      resolvedDate,
+      latestAvailableDate,
+
+      exactMatch: exactDateMatch,
+      fallbackUsed,
+      usedLatestBecauseNoDate,
+
+      availableDates,
+    };
+
     const agentMessage = buildAgentMessage({
       filterStatus,
       selectedCommodity,
       selectedSiteOrOrigin,
+
+      dateResolution,
       rows: sortedRows,
       summary,
     });
@@ -280,77 +380,40 @@ module.exports = async function handler(req, res) {
 
       request: {
         filterStatus,
-        commodity: selectedCommodity || null,
-        siteOrOrigin: selectedSiteOrOrigin || null,
+        commodity:
+          selectedCommodity || null,
+        siteOrOrigin:
+          selectedSiteOrOrigin || null,
+        asOfDate: requestedDate || null,
       },
 
+      dateResolution,
+
       inputCounts: {
-        physicalPositions: physicalPositions.length,
-        hedgePositions: hedgePositions.length,
+        physicalPositions:
+          physicalPositions.length,
+
+        hedgePositions:
+          hedgePositions.length,
+
         riskLimits: riskLimits.length,
+
+        datedPhysicalPositions:
+          datedPhysicalPositions.length,
+
+        datedHedgePositions:
+          datedHedgePositions.length,
       },
 
       summary,
       snapshotRows: sortedRows,
       agentMessage,
-
-      /*
-       * Temporary debug output.
-       * Remove after everything works correctly.
-       */
-      debug: {
-        physicalFields: Object.keys(physicalPositions[0] || {}),
-        hedgeFields: Object.keys(hedgePositions[0] || {}),
-        limitFields: Object.keys(riskLimits[0] || {}),
-
-        physicalValues: physicalPositions.slice(0, 10).map((row) => ({
-          commodity: getCommodity(row),
-          siteOrOrigin: getPhysicalSite(row),
-          volumeMT: toNumber(
-            getField(row, [
-              "VolumeMT",
-              "Volume MT",
-              "Volume_x0020_MT",
-            ])
-          ),
-        })),
-
-        hedgeValues: hedgePositions.slice(0, 10).map((row) => ({
-          commodity: getCommodity(row),
-          linkedSite: getHedgeSite(row),
-          volumeMT: toNumber(
-            getField(row, [
-              "VolumeMT",
-              "Volume MT",
-              "Volume_x0020_MT",
-            ])
-          ),
-        })),
-
-        limitValues: riskLimits.slice(0, 10).map((row) => ({
-          commodity: getCommodity(row),
-          siteOrOrigin: getLimitSite(row),
-
-          limitType: extractTextValue(
-            getField(row, [
-              "LimitType",
-              "Limit Type",
-              "Limit_x0020_Type",
-            ])
-          ),
-
-          limitAmount: toNumber(
-            getField(row, [
-              "LimitAmount",
-              "Limit Amount",
-              "Limit_x0020_Amount",
-            ])
-          ),
-        })),
-      },
     });
   } catch (error) {
-    console.error("Exposure calculation failed:", error);
+    console.error(
+      "Exposure calculation failed:",
+      error
+    );
 
     return res.status(400).json({
       success: false,
@@ -371,7 +434,10 @@ function normalizeRows(input) {
 
   if (Array.isArray(input)) {
     rows = input;
-  } else if (input && Array.isArray(input.value)) {
+  } else if (
+    input &&
+    Array.isArray(input.value)
+  ) {
     rows = input.value;
   }
 
@@ -381,7 +447,13 @@ function normalizeRows(input) {
     }
 
     /*
-     * Supports payloads with nested SharePoint fields.
+     * Supports payloads containing:
+     * {
+     *   fields: {
+     *     Commodity: "...",
+     *     AsOfDate: "..."
+     *   }
+     * }
      */
     if (
       row.fields &&
@@ -399,7 +471,10 @@ function normalizeRows(input) {
 }
 
 function cleanText(value) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return "";
   }
 
@@ -407,26 +482,29 @@ function cleanText(value) {
 }
 
 /**
- * Extract text from:
+ * Extracts text from:
  *
- * 1. Normal strings:
- *    RawSugar
+ * RawSugar
  *
- * 2. SharePoint lookup objects:
- *    { "Id": 0, "Value": "RawSugar" }
+ * { Value: "RawSugar" }
  *
- * 3. SharePoint lookup arrays:
- *    [{ "Id": 0, "Value": "RawSugar" }]
+ * [{ Value: "RawSugar" }]
  *
- * 4. JSON arrays serialized as strings:
- *    "[{\"Id\":0,\"Value\":\"RawSugar\"}]"
+ * "[{\"Value\":\"RawSugar\"}]"
  */
+
 function extractTextValue(value) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return "";
   }
 
-  if (typeof value === "number" || typeof value === "boolean") {
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
     return String(value).trim();
   }
 
@@ -439,15 +517,15 @@ function extractTextValue(value) {
 
     try {
       const parsed = JSON.parse(text);
-      const parsedValue = extractTextValue(parsed);
+
+      const parsedValue =
+        extractTextValue(parsed);
 
       if (parsedValue) {
         return parsedValue;
       }
     } catch {
-      /*
-       * Normal text, not JSON.
-       */
+      // Normal string.
     }
 
     return text;
@@ -458,9 +536,6 @@ function extractTextValue(value) {
       return "";
     }
 
-    /*
-     * Usually one SharePoint lookup value.
-     */
     return extractTextValue(value[0]);
   }
 
@@ -477,23 +552,28 @@ function extractTextValue(value) {
       value.DisplayName ??
       value.displayName;
 
-    if (preferredValue !== undefined && preferredValue !== null) {
-      return extractTextValue(preferredValue);
+    if (
+      preferredValue !== undefined &&
+      preferredValue !== null
+    ) {
+      return extractTextValue(
+        preferredValue
+      );
     }
 
-    /*
-     * Fallback for objects with a single usable property.
-     */
-    const usableEntries = Object.entries(value).filter(
-      ([key, entryValue]) =>
-        !key.startsWith("@odata") &&
-        !key.endsWith("@odata.type") &&
-        entryValue !== null &&
-        entryValue !== undefined
-    );
+    const usableEntries =
+      Object.entries(value).filter(
+        ([key, entryValue]) =>
+          !key.startsWith("@odata") &&
+          !key.endsWith("@odata.type") &&
+          entryValue !== null &&
+          entryValue !== undefined
+      );
 
     if (usableEntries.length === 1) {
-      return extractTextValue(usableEntries[0][1]);
+      return extractTextValue(
+        usableEntries[0][1]
+      );
     }
 
     return "";
@@ -513,20 +593,26 @@ function normalizeText(value) {
 }
 
 function sameText(left, right) {
-  return normalizeText(left) === normalizeText(right);
+  return (
+    normalizeText(left) ===
+    normalizeText(right)
+  );
 }
 
 function getField(row, possibleNames) {
-  if (!row || typeof row !== "object") {
+  if (
+    !row ||
+    typeof row !== "object"
+  ) {
     return undefined;
   }
 
-  /*
-   * Exact field-name match.
-   */
   for (const name of possibleNames) {
     if (
-      Object.prototype.hasOwnProperty.call(row, name) &&
+      Object.prototype.hasOwnProperty.call(
+        row,
+        name
+      ) &&
       row[name] !== null &&
       row[name] !== undefined
     ) {
@@ -534,16 +620,16 @@ function getField(row, possibleNames) {
     }
   }
 
-  /*
-   * Case-, spacing-, and SharePoint-code-insensitive match.
-   */
   const rowKeys = Object.keys(row);
 
   for (const expectedName of possibleNames) {
-    const expectedNormalized = normalizeText(expectedName);
+    const expectedNormalized =
+      normalizeText(expectedName);
 
     const matchingKey = rowKeys.find(
-      (key) => normalizeText(key) === expectedNormalized
+      (key) =>
+        normalizeText(key) ===
+        expectedNormalized
     );
 
     if (
@@ -556,6 +642,130 @@ function getField(row, possibleNames) {
   }
 
   return undefined;
+}
+
+/* =========================================================
+   Date handling
+   ========================================================= */
+
+function getRowDate(row) {
+  const value = getField(row, [
+    "AsOfDate",
+    "As Of Date",
+    "AsOf Date",
+    "As_x0020_Of_x0020_Date",
+
+    "TradeDate",
+    "Trade Date",
+    "Trade_x0020_Date",
+
+    "Date",
+    "BusinessDate",
+    "Business Date",
+
+    "field_10",
+    "field_11",
+  ]);
+
+  return normalizeDate(value);
+}
+
+function normalizeDate(value) {
+  const rawValue =
+    extractTextValue(value);
+
+  if (!rawValue) {
+    return "";
+  }
+
+  /*
+   * Handles SharePoint ISO dates:
+   * 2026-07-22T00:00:00Z
+   */
+  const isoDateMatch =
+    rawValue.match(
+      /^(\d{4})-(\d{2})-(\d{2})/
+    );
+
+  if (isoDateMatch) {
+    return `${isoDateMatch[1]}-${isoDateMatch[2]}-${isoDateMatch[3]}`;
+  }
+
+  /*
+   * Handles DD/MM/YYYY.
+   */
+  const dayFirstMatch =
+    rawValue.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
+    );
+
+  if (dayFirstMatch) {
+    const day = dayFirstMatch[1].padStart(
+      2,
+      "0"
+    );
+
+    const month =
+      dayFirstMatch[2].padStart(
+        2,
+        "0"
+      );
+
+    const year = dayFirstMatch[3];
+
+    return `${year}-${month}-${day}`;
+  }
+
+  /*
+   * Last fallback for readable date strings.
+   */
+  const parsedDate = new Date(rawValue);
+
+  if (
+    !Number.isNaN(parsedDate.getTime())
+  ) {
+    const year =
+      parsedDate.getUTCFullYear();
+
+    const month = String(
+      parsedDate.getUTCMonth() + 1
+    ).padStart(2, "0");
+
+    const day = String(
+      parsedDate.getUTCDate()
+    ).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  }
+
+  return "";
+}
+
+function collectAvailableDates(
+  physicalPositions,
+  hedgePositions
+) {
+  const dateSet = new Set();
+
+  [
+    ...physicalPositions,
+    ...hedgePositions,
+  ].forEach((row) => {
+    const date = getRowDate(row);
+
+    if (date) {
+      dateSet.add(date);
+    }
+  });
+
+  /*
+   * YYYY-MM-DD strings sort correctly.
+   * Newest date first.
+   */
+  return Array.from(dateSet).sort(
+    (left, right) =>
+      right.localeCompare(left)
+  );
 }
 
 /* =========================================================
@@ -581,9 +791,11 @@ function getPhysicalSite(row) {
       "SiteOrOrigin",
       "Site Or Origin",
       "Site_x0020_Or_x0020_Origin",
+
       "OriginOrSite",
       "Origin Or Site",
       "Origin_x0020_Or_x0020_Site",
+
       "Site",
       "Location",
       "field_3",
@@ -597,13 +809,17 @@ function getHedgeSite(row) {
       "LinkedSite",
       "Linked Site",
       "Linked_x0020_Site",
+
       "LinkedSiteOrOrigin",
       "Linked Site Or Origin",
+
       "SiteOrOrigin",
       "Site Or Origin",
       "Site_x0020_Or_x0020_Origin",
+
       "OriginOrSite",
       "Origin Or Site",
+
       "Site",
       "Location",
       "field_7",
@@ -617,10 +833,13 @@ function getLimitSite(row) {
       "SiteOrOrigin",
       "Site Or Origin",
       "Site_x0020_Or_x0020_Origin",
+
       "LinkedSite",
       "Linked Site",
+
       "OriginOrSite",
       "Origin Or Site",
+
       "Site",
       "Location",
       "field_2",
@@ -632,9 +851,17 @@ function getLimitSite(row) {
    Filter logic
    ========================================================= */
 
-function deriveFilterStatus(commodity, siteOrOrigin) {
-  const hasCommodity = Boolean(cleanText(commodity));
-  const hasSite = Boolean(cleanText(siteOrOrigin));
+function deriveFilterStatus(
+  commodity,
+  siteOrOrigin
+) {
+  const hasCommodity = Boolean(
+    cleanText(commodity)
+  );
+
+  const hasSite = Boolean(
+    cleanText(siteOrOrigin)
+  );
 
   if (!hasCommodity && !hasSite) {
     return "ALL";
@@ -662,7 +889,10 @@ function keyMatchesSelection({
       return true;
 
     case "COMMODITY_ONLY":
-      return sameText(key.commodity, selectedCommodity);
+      return sameText(
+        key.commodity,
+        selectedCommodity
+      );
 
     case "SITE_ONLY":
       return sameText(
@@ -672,7 +902,10 @@ function keyMatchesSelection({
 
     case "COMMODITY_AND_SITE":
       return (
-        sameText(key.commodity, selectedCommodity) &&
+        sameText(
+          key.commodity,
+          selectedCommodity
+        ) &&
         sameText(
           key.siteOrOrigin,
           selectedSiteOrOrigin
@@ -695,9 +928,15 @@ function buildExposureKeys({
 }) {
   const keyMap = new Map();
 
-  function addKey(commodity, siteOrOrigin) {
-    const cleanCommodity = extractTextValue(commodity);
-    const cleanSite = extractTextValue(siteOrOrigin);
+  function addKey(
+    commodity,
+    siteOrOrigin
+  ) {
+    const cleanCommodity =
+      extractTextValue(commodity);
+
+    const cleanSite =
+      extractTextValue(siteOrOrigin);
 
     if (!cleanCommodity || !cleanSite) {
       return;
@@ -736,7 +975,9 @@ function buildExposureKeys({
     );
   });
 
-  return Array.from(keyMap.values());
+  return Array.from(
+    keyMap.values()
+  );
 }
 
 /* =========================================================
@@ -745,7 +986,9 @@ function buildExposureKeys({
 
 function toNumber(value) {
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
+    return Number.isFinite(value)
+      ? value
+      : 0;
   }
 
   if (
@@ -763,28 +1006,49 @@ function toNumber(value) {
 
   const number = Number(cleaned);
 
-  return Number.isFinite(number) ? number : 0;
+  return Number.isFinite(number)
+    ? number
+    : 0;
 }
 
-function sumRows(rows, possibleFields) {
-  return rows.reduce((total, row) => {
-    const value = getField(row, possibleFields);
-    return total + toNumber(value);
-  }, 0);
+function sumRows(
+  rows,
+  possibleFields
+) {
+  return rows.reduce(
+    (total, row) => {
+      const value = getField(
+        row,
+        possibleFields
+      );
+
+      return total + toNumber(value);
+    },
+    0
+  );
 }
 
-function round(value, decimalPlaces = 2) {
-  const factor = 10 ** decimalPlaces;
+function round(
+  value,
+  decimalPlaces = 2
+) {
+  const factor =
+    10 ** decimalPlaces;
 
   return (
     Math.round(
-      (toNumber(value) + Number.EPSILON) * factor
+      (toNumber(value) +
+        Number.EPSILON) *
+        factor
     ) / factor
   );
 }
 
-function calculateStatus(utilizationPct) {
-  const utilization = toNumber(utilizationPct);
+function calculateStatus(
+  utilizationPct
+) {
+  const utilization =
+    toNumber(utilizationPct);
 
   if (utilization >= 100) {
     return "Breach";
@@ -809,36 +1073,62 @@ function sortRows(rows) {
     NO_LIMIT: 4,
   };
 
-  return [...rows].sort((left, right) => {
-    const statusDifference =
-      (statusPriority[left.status] || 99) -
-      (statusPriority[right.status] || 99);
+  return [...rows].sort(
+    (left, right) => {
+      const statusDifference =
+        (statusPriority[left.status] ||
+          99) -
+        (statusPriority[right.status] ||
+          99);
 
-    if (statusDifference !== 0) {
-      return statusDifference;
-    }
+      if (statusDifference !== 0) {
+        return statusDifference;
+      }
 
-    const commodityDifference =
-      cleanText(left.commodity).localeCompare(
-        cleanText(right.commodity)
+      if (
+        right.utilizationPct !==
+        left.utilizationPct
+      ) {
+        return (
+          toNumber(
+            right.utilizationPct
+          ) -
+          toNumber(
+            left.utilizationPct
+          )
+        );
+      }
+
+      const commodityDifference =
+        cleanText(
+          left.commodity
+        ).localeCompare(
+          cleanText(right.commodity)
+        );
+
+      if (
+        commodityDifference !== 0
+      ) {
+        return commodityDifference;
+      }
+
+      return cleanText(
+        left.siteOrOrigin
+      ).localeCompare(
+        cleanText(
+          right.siteOrOrigin
+        )
       );
-
-    if (commodityDifference !== 0) {
-      return commodityDifference;
     }
-
-    return cleanText(
-      left.siteOrOrigin
-    ).localeCompare(
-      cleanText(right.siteOrOrigin)
-    );
-  });
+  );
 }
 
 function buildAgentMessage({
   filterStatus,
   selectedCommodity,
   selectedSiteOrOrigin,
+
+  dateResolution,
   rows,
   summary,
 }) {
@@ -861,52 +1151,114 @@ function buildAgentMessage({
       ? selection.join(" | ")
       : "All commodities and sites";
 
+  const dateLines = [];
+
+  if (
+    dateResolution.usedLatestBecauseNoDate
+  ) {
+    dateLines.push(
+      "No date was specified."
+    );
+
+    dateLines.push(
+      `Using the latest available data date: ${dateResolution.resolvedDate}.`
+    );
+  } else if (
+    dateResolution.exactMatch
+  ) {
+    dateLines.push(
+      `Requested date: ${dateResolution.requestedDate}.`
+    );
+
+    dateLines.push(
+      "Exposure data was found for the requested date."
+    );
+  } else if (
+    dateResolution.fallbackUsed
+  ) {
+    dateLines.push(
+      `No exposure data was found for ${dateResolution.requestedDate}.`
+    );
+
+    dateLines.push(
+      `Using the latest available data date instead: ${dateResolution.resolvedDate}.`
+    );
+  }
+
+  dateLines.push(
+    `Available dates: ${dateResolution.availableDates.join(", ")}.`
+  );
+
   if (rows.length === 0) {
     return [
       "Exposure Snapshot Results",
+      ...dateLines,
       `Filter: ${filterStatus}`,
       `Selection: ${selectionText}`,
       "",
-      "No matching exposure rows were returned.",
-      "Verify the source field mappings and requested input values.",
+      "No matching exposure rows were returned for the selected Commodity and Site/Origin.",
     ].join("\n");
   }
 
-  const detailLines = rows.map((row) => {
-    const utilizationText =
-      row.utilizationPct === null
-        ? "No limit"
-        : `${formatNumber(row.utilizationPct)}%`;
+  const detailLines = rows.map(
+    (row) => {
+      const utilizationText =
+        row.utilizationPct === null
+          ? "No limit"
+          : `${formatNumber(
+              row.utilizationPct
+            )}%`;
 
-    return (
-      `${row.commodity} ${row.siteOrOrigin}: ` +
-      `Physical ${formatNumber(row.physicalMT)} MT | ` +
-      `Hedge ${formatNumber(row.hedgeMT)} MT | ` +
-      `Net ${formatNumber(row.netMT)} MT | ` +
-      `Limit ${formatNumber(row.limitAmount)} | ` +
-      `Util ${utilizationText} | ` +
-      `${row.status}`
-    );
-  });
+      return (
+        `${row.commodity} ${row.siteOrOrigin}: ` +
+        `Physical ${formatNumber(
+          row.physicalMT
+        )} MT | ` +
+        `Hedge ${formatNumber(
+          row.hedgeMT
+        )} MT | ` +
+        `Net ${formatNumber(
+          row.netMT
+        )} MT | ` +
+        `Limit ${formatNumber(
+          row.limitAmount
+        )} MT | ` +
+        `Util ${utilizationText} | ` +
+        `${row.status}`
+      );
+    }
+  );
 
   return [
     "Exposure Snapshot Results",
+    ...dateLines,
+
+    `Resolved data date: ${dateResolution.resolvedDate}`,
     `Filter: ${filterStatus}`,
     `Selection: ${selectionText}`,
+
     `Rows: ${summary.totalRows}`,
+    `OK: ${summary.okCount}`,
     `Watch: ${summary.watchCount}`,
     `Breach: ${summary.breachCount}`,
+
     "",
     ...detailLines,
   ].join("\n");
 }
 
 function formatNumber(value) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return "N/A";
   }
 
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 2,
-  }).format(toNumber(value));
+  return new Intl.NumberFormat(
+    "en-US",
+    {
+      maximumFractionDigits: 2,
+    }
+  ).format(toNumber(value));
 }
