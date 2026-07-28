@@ -33,8 +33,25 @@ module.exports = async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    const selectedCommodity = extractTextValue(body.commodity);
-    const selectedSiteOrOrigin = extractTextValue(body.siteOrOrigin);
+    const rawCommodity = extractTextValue(body.commodity);
+    const rawSiteOrOrigin = extractTextValue(body.siteOrOrigin);
+
+    /*
+     * Copilot Studio sends the literal value "ALL" when the user
+     * does not specify a Commodity and/or SiteOrOrigin.
+     *
+     * The existing filter logic treats empty strings as "no filter",
+     * so normalize ALL to an empty string before deriving filter status.
+     */
+    const selectedCommodity =
+      !rawCommodity || sameText(rawCommodity, "ALL")
+        ? ""
+        : rawCommodity;
+
+    const selectedSiteOrOrigin =
+      !rawSiteOrOrigin || sameText(rawSiteOrOrigin, "ALL")
+        ? ""
+        : rawSiteOrOrigin;
 
     const physicalPositions = normalizeRows(body.physicalPositions);
     const hedgePositions = normalizeRows(body.hedgePositions);
