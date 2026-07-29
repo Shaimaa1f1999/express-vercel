@@ -6,7 +6,8 @@
  *
  * This endpoint has no Commodity, Site, or Date filters.
  * It always:
- * 1. Finds the latest available exposure date.
+ * 1. Finds the latest common AsOfDate available in both
+ *    Physical Positions and Hedge Positions.
  * 2. Calculates all site/origin exposure rows.
  * 3. Calculates one Commodity Total row for each commodity.
  * 4. Returns SharePoint-ready rows.
@@ -36,40 +37,91 @@ module.exports = async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    const physicalPositions =
-      normalizeRows(body.physicalPositions);
+    const physicalPositions = normalizeRows(
+      body.physicalPositions
+    );
 
-    const hedgePositions =
-      normalizeRows(body.hedgePositions);
+    const hedgePositions = normalizeRows(
+      body.hedgePositions
+    );
 
-    const riskLimits =
-      normalizeRows(body.riskLimits);
+    const riskLimits = normalizeRows(
+      body.riskLimits
+    );
 
     /*
-     * Find every valid date from Physical and Hedge data.
+     * Collect available dates separately from each source.
      */
-    const availableDates =
-      collectAvailableDates(
-        physicalPositions,
+    const physicalAvailableDates =
+      collectSourceDates(
+        physicalPositions
+      );
+
+    const hedgeAvailableDates =
+      collectSourceDates(
         hedgePositions
       );
 
-    if (availableDates.length === 0) {
+    if (
+      physicalAvailableDates.length === 0
+    ) {
       return res.status(400).json({
         success: false,
         error:
-          "No valid AsOfDate values were found in Physical Positions or Hedge Positions.",
+          "No valid AsOfDate values were found in Physical Positions.",
+        physicalAvailableDates,
+        hedgeAvailableDates,
+      });
+    }
+
+    if (
+      hedgeAvailableDates.length === 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "No valid AsOfDate values were found in Hedge Positions.",
+        physicalAvailableDates,
+        hedgeAvailableDates,
       });
     }
 
     /*
-     * Dates are sorted newest first.
+     * Find dates that exist in both Physical Positions
+     * and Hedge Positions.
+     *
+     * This prevents mixing source data from different
+     * business dates in one exposure snapshot.
      */
-    const resolvedDate =
-      availableDates[0];
+    const commonAvailableDates =
+      findCommonDates(
+        physicalAvailableDates,
+        hedgeAvailableDates
+      );
+
+    if (
+      commonAvailableDates.length === 0
+    ) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "No common AsOfDate exists between Physical Positions and Hedge Positions. Snapshot was not generated.",
+        dateSelectionPolicy:
+          "LATEST_COMMON_DATE",
+        physicalAvailableDates,
+        hedgeAvailableDates,
+        commonAvailableDates,
+      });
+    }
 
     /*
-     * Only calculate the latest available source date.
+     * Common dates are sorted newest first.
+     */
+    const resolvedDate =
+      commonAvailableDates[0];
+
+    /*
+     * Only calculate rows from the resolved business date.
      */
     const datedPhysicalPositions =
       physicalPositions.filter(
@@ -84,6 +136,31 @@ module.exports = async function handler(req, res) {
           getRowDate(row) ===
           resolvedDate
       );
+
+    /*
+     * Defensive validation.
+     *
+     * The resolved date must contain records
+     * from both source lists.
+     */
+    if (
+      datedPhysicalPositions.length === 0 ||
+      datedHedgePositions.length === 0
+    ) {
+      return res.status(409).json({
+        success: false,
+        error:
+          `Exposure data is incomplete for ${resolvedDate}. ` +
+          "Snapshot was not generated.",
+        resolvedDate,
+        dateSelectionPolicy:
+          "LATEST_COMMON_DATE",
+        datedPhysicalCount:
+          datedPhysicalPositions.length,
+        datedHedgeCount:
+          datedHedgePositions.length,
+      });
+    }
 
     /*
      * Risk Limits do not have AsOfDate.
@@ -120,6 +197,15 @@ module.exports = async function handler(req, res) {
         riskLimits:
           netExposureLimits,
       });
+
+    if (exposureKeys.length === 0) {
+      return res.status(409).json({
+        success: false,
+        error:
+          `No valid Commodity and Site/Origin combinations were found for ${resolvedDate}.`,
+        resolvedDate,
+      });
+    }
 
     /*
      * Calculate actual site/origin rows.
@@ -158,7 +244,7 @@ module.exports = async function handler(req, res) {
     /*
      * Create SharePoint-ready rows.
      *
-     * SnapshotId example:
+     * SnapshotId examples:
      * SNP-20260722-01
      * SNP-20260722-02
      */
@@ -209,6 +295,9 @@ module.exports = async function handler(req, res) {
     const summary = {
       resolvedDate,
 
+      dateSelectionPolicy:
+        "LATEST_COMMON_DATE",
+
       totalRows:
         sharePointRows.length,
 
@@ -258,7 +347,14 @@ module.exports = async function handler(req, res) {
 
       resolvedDate,
 
-      availableDates,
+      dateSelectionPolicy:
+        "LATEST_COMMON_DATE",
+
+      physicalAvailableDates,
+
+      hedgeAvailableDates,
+
+      commonAvailableDates,
 
       inputCounts: {
         physicalPositions:
@@ -275,12 +371,15 @@ module.exports = async function handler(req, res) {
 
         datedHedgePositions:
           datedHedgePositions.length,
+
+        netExposureLimits:
+          netExposureLimits.length,
       },
 
       summary,
 
       /*
-       * Use this array in Apply to each.
+       * Use this array in Power Automate Apply to each.
        */
       snapshotRows:
         sharePointRows,
@@ -359,8 +458,7 @@ function normalizeRows(input) {
      */
     if (
       row.fields &&
-      typeof row.fields ===
-        "object" &&
+      typeof row.fields === "object" &&
       !Array.isArray(row.fields)
     ) {
       return {
@@ -406,7 +504,9 @@ function extractTextValue(value) {
         return parsedText;
       }
     } catch {
-      // Normal text.
+      /*
+       * Normal text.
+       */
     }
 
     return text;
@@ -436,8 +536,7 @@ function extractTextValue(value) {
       value.displayName;
 
     if (
-      preferredValue !==
-        undefined &&
+      preferredValue !== undefined &&
       preferredValue !== null
     ) {
       return extractTextValue(
@@ -448,9 +547,7 @@ function extractTextValue(value) {
     const usableEntries =
       Object.entries(value).filter(
         ([key, entryValue]) =>
-          !key.startsWith(
-            "@odata"
-          ) &&
+          !key.startsWith("@odata") &&
           !key.endsWith(
             "@odata.type"
           ) &&
@@ -548,8 +645,7 @@ function getField(
     if (
       matchingKey &&
       row[matchingKey] !== null &&
-      row[matchingKey] !==
-        undefined
+      row[matchingKey] !== undefined
     ) {
       return row[matchingKey];
     }
@@ -671,17 +767,11 @@ function normalizeDate(value) {
   return `${year}-${month}-${day}`;
 }
 
-function collectAvailableDates(
-  physicalPositions,
-  hedgePositions
-) {
+function collectSourceDates(rows) {
   const dateSet =
     new Set();
 
-  [
-    ...physicalPositions,
-    ...hedgePositions,
-  ].forEach((row) => {
+  rows.forEach((row) => {
     const date =
       getRowDate(row);
 
@@ -699,6 +789,23 @@ function collectAvailableDates(
     (left, right) =>
       right.localeCompare(left)
   );
+}
+
+function findCommonDates(
+  physicalDates,
+  hedgeDates
+) {
+  const hedgeDateSet =
+    new Set(hedgeDates);
+
+  return physicalDates
+    .filter((date) =>
+      hedgeDateSet.has(date)
+    )
+    .sort(
+      (left, right) =>
+        right.localeCompare(left)
+    );
 }
 
 /* =========================================================
@@ -1059,7 +1166,7 @@ function buildSiteSnapshotRow({
     );
 
   /*
-   * Hedge values are already negative.
+   * Hedge values are expected to already be negative.
    */
   const netMT =
     round(
